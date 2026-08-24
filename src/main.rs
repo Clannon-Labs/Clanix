@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    net::SocketAddr,
+    net::{Ipv6Addr, SocketAddr},
     process::Stdio,
     sync::{
         Arc,
@@ -161,10 +161,11 @@ async fn main() {
         });
 
     println!("Clannon is ready at http://{address}");
-    if let Err(error) = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_and_cleanup(state))
-        .await
-    {
+    let server_result = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_and_cleanup(state.clone()))
+        .await;
+    state.cleanup().await;
+    if let Err(error) = server_result {
         eprintln!("server error: {error}");
     }
 }
@@ -481,7 +482,7 @@ async fn observations(
     };
     let network = match exec_in_container(
         &environment.container_name,
-        "for f in tcp tcp6 udp udp6; do echo __$f__; cat /proc/net/$f 2>/dev/null; done",
+        "for f in tcp tcp6 udp udp6; do echo __${f}__; cat /proc/net/$f 2>/dev/null; done",
     )
     .await
     {
@@ -637,6 +638,9 @@ fn decode_endpoint(raw: &str, ipv6: bool) -> String {
         return raw.to_owned();
     };
     if ipv6 {
+        let Some(address) = decode_ipv6_address(address) else {
+            return raw.to_owned();
+        };
         return format!("[{address}]:{port}");
     }
     let Ok(value) = u32::from_str_radix(address, 16) else {
@@ -647,6 +651,20 @@ fn decode_endpoint(raw: &str, ipv6: bool) -> String {
         "{}.{}.{}.{}:{port}",
         octets[0], octets[1], octets[2], octets[3]
     )
+}
+
+fn decode_ipv6_address(raw: &str) -> Option<Ipv6Addr> {
+    if raw.len() != 32 || !raw.is_ascii() {
+        return None;
+    }
+
+    let mut octets = [0_u8; 16];
+    for (index, chunk) in raw.as_bytes().chunks_exact(8).enumerate() {
+        let chunk = std::str::from_utf8(chunk).ok()?;
+        let word = u32::from_str_radix(chunk, 16).ok()?;
+        octets[index * 4..index * 4 + 4].copy_from_slice(&word.to_ne_bytes());
+    }
+    Some(Ipv6Addr::from(octets))
 }
 
 fn network_state(code: &str) -> &str {
@@ -754,6 +772,29 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn parses_and_decodes_ipv6_network_snapshot() {
+        let raw = "__tcp6__\n  sl  local_address rem_address   st\n   0: 00000000000000000000000001000000:1F90 B80D0120000000000000000001000000:01BB 01\n";
+        assert_eq!(
+            parse_network(raw),
+            vec![NetworkObservation {
+                protocol: "tcp6".into(),
+                local_address: "[::1]:8080".into(),
+                remote_address: "[2001:db8::1]:443".into(),
+                state: "established".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn preserves_malformed_ipv6_endpoints() {
+        assert_eq!(
+            decode_endpoint("000000000000000000000000GG000000:0050", true),
+            "000000000000000000000000GG000000:0050"
+        );
+        assert_eq!(decode_endpoint("00000000:0050", true), "00000000:0050");
     }
 
     #[test]

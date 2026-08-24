@@ -54,7 +54,7 @@ const timeout = setTimeout(() => {
   process.exit(1);
 }, 10_000);
 socket.addEventListener("open", () => {
-  socket.send("printf 'smoke-proof\\n' > proof.txt; nohup sleep 20 >/dev/null 2>&1 & echo command-finished\n");
+  socket.send("printf 'smoke-proof\\n' > proof.txt; nohup sleep 20 >/dev/null 2>&1 & nohup nc -l -s 0.0.0.0 -p 23456 >/dev/null 2>&1 & for delay in 1 2 3 4 5 6 7 8 9 10; do grep -q ':5BA0 ' /proc/net/tcp && break; sleep 0.1; done; grep -q ':5BA0 ' /proc/net/tcp && echo command-finished\n");
 });
 socket.addEventListener("message", (event) => {
   if (String(event.data).includes("command-finished")) {
@@ -78,8 +78,13 @@ const snapshot = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const hasProofFile = snapshot.files.some((file) => file.path === "/workspace/proof.txt");
 const hasCommand = snapshot.transcript.some((entry) => entry.direction === "input" && entry.data.includes("proof.txt"));
 const hasSleep = snapshot.processes.some((process) => process.command === "sleep");
-if (!hasProofFile || !hasCommand || !hasSleep) {
-  console.error(JSON.stringify({ hasProofFile, hasCommand, hasSleep, snapshot }, null, 2));
+const hasTcpListener = snapshot.network.some((socket) =>
+  socket.protocol === "tcp" &&
+  socket.local_address === "0.0.0.0:23456" &&
+  socket.state === "listening"
+);
+if (!hasProofFile || !hasCommand || !hasSleep || !hasTcpListener) {
+  console.error(JSON.stringify({ hasProofFile, hasCommand, hasSleep, hasTcpListener, snapshot }, null, 2));
   process.exit(1);
 }
 NODE

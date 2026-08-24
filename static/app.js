@@ -4,9 +4,11 @@ const elements = {
   refresh: document.querySelector("#refresh"),
   form: document.querySelector("#terminal-form"),
   command: document.querySelector("#command"),
-  run: document.querySelector("#terminal-form button"),
+  run: document.querySelector("#terminal-form button[type='submit']"),
+  reconnect: document.querySelector("#reconnect"),
   output: document.querySelector("#terminal-output"),
   environmentId: document.querySelector("#environment-id"),
+  terminalStatus: document.querySelector("#terminal-status"),
   stateDot: document.querySelector("#state-dot"),
   stateLabel: document.querySelector("#state-label"),
   warnings: document.querySelector("#warnings"),
@@ -15,11 +17,14 @@ const elements = {
 
 let environmentId = null;
 let socket = null;
+let terminalState = "disconnected";
+let destroying = false;
 
 elements.create.addEventListener("click", createEnvironment);
 elements.destroy.addEventListener("click", destroyEnvironment);
 elements.refresh.addEventListener("click", refreshObservations);
 elements.form.addEventListener("submit", runCommand);
+elements.reconnect.addEventListener("click", () => connectTerminal(false));
 window.addEventListener("beforeunload", () => socket?.close());
 
 async function createEnvironment() {
@@ -32,8 +37,8 @@ async function createEnvironment() {
     elements.environmentId.textContent = environmentId;
     elements.stateLabel.textContent = "Environment running";
     elements.stateDot.classList.add("running");
-    enableEnvironmentControls(true);
-    connectTerminal();
+    updateEnvironmentControls();
+    connectTerminal(true);
     await refreshObservations();
   } catch (error) {
     showTerminalError(error);
@@ -43,28 +48,52 @@ async function createEnvironment() {
   }
 }
 
-function connectTerminal() {
+function connectTerminal(clearOutput) {
+  if (!environmentId || socket?.readyState === WebSocket.CONNECTING || socket?.readyState === WebSocket.OPEN) return;
+
+  const id = environmentId;
   const protocol = location.protocol === "https:" ? "wss" : "ws";
-  socket = new WebSocket(`${protocol}://${location.host}/api/environments/${environmentId}/terminal`);
-  socket.addEventListener("open", () => {
-    elements.output.textContent = "";
+  const terminalSocket = new WebSocket(`${protocol}://${location.host}/api/environments/${id}/terminal`);
+  socket = terminalSocket;
+  setTerminalState("connecting");
+
+  terminalSocket.addEventListener("open", () => {
+    if (!isCurrentSocket(terminalSocket, id)) return;
+    if (clearOutput) {
+      elements.output.textContent = "";
+    } else {
+      appendOutput("\n[terminal reconnected]\n");
+    }
+    setTerminalState("ready");
     elements.command.focus();
   });
-  socket.addEventListener("message", (event) => appendOutput(event.data));
-  socket.addEventListener("close", () => {
+  terminalSocket.addEventListener("message", (event) => {
+    if (!isCurrentSocket(terminalSocket, id)) return;
+    appendOutput(event.data);
+  });
+  terminalSocket.addEventListener("close", () => {
+    if (!isCurrentSocket(terminalSocket, id)) return;
+    socket = null;
     if (environmentId) {
       appendOutput("\n[terminal disconnected — the environment may still be inspected]\n");
-      elements.command.disabled = true;
-      elements.run.disabled = true;
+      setTerminalState("disconnected");
     }
   });
-  socket.addEventListener("error", () => showTerminalError("Could not connect the browser terminal."));
+  terminalSocket.addEventListener("error", () => {
+    if (!isCurrentSocket(terminalSocket, id)) return;
+    showTerminalError("Could not connect the browser terminal.");
+  });
 }
 
 function runCommand(event) {
   event.preventDefault();
   const command = elements.command.value;
-  if (!command || socket?.readyState !== WebSocket.OPEN) return;
+  if (!command) return;
+  if (socket?.readyState !== WebSocket.OPEN) {
+    showTerminalError("Terminal is not ready. Reconnect before running commands.");
+    updateTerminalControls();
+    return;
+  }
   appendOutput(`${command}\n`);
   socket.send(`${command}\n`);
   elements.command.value = "";
@@ -85,24 +114,27 @@ async function refreshObservations() {
   } catch (error) {
     renderWarnings([String(error)]);
   } finally {
-    elements.refresh.disabled = !environmentId;
+    updateEnvironmentControls();
   }
 }
 
 async function destroyEnvironment() {
   if (!environmentId) return;
   const id = environmentId;
-  elements.destroy.disabled = true;
+  destroying = true;
+  updateEnvironmentControls();
   elements.stateLabel.textContent = "Destroying environment…";
-  socket?.close();
   try {
     const response = await fetch(`/api/environments/${id}`, { method: "DELETE" });
     await readResponse(response);
+    const destroyedSocket = socket;
     resetEnvironment();
+    destroyedSocket?.close();
     elements.output.textContent = "Environment destroyed. Its container and writable data are gone.";
   } catch (error) {
     environmentId = id;
-    enableEnvironmentControls(true);
+    destroying = false;
+    updateEnvironmentControls();
     elements.stateLabel.textContent = "Destroy failed";
     showTerminalError(error);
   }
@@ -148,10 +180,12 @@ function renderWarnings(warnings) {
 function resetEnvironment() {
   environmentId = null;
   socket = null;
+  destroying = false;
   elements.environmentId.textContent = "waiting for environment";
   elements.stateLabel.textContent = "No environment";
   elements.stateDot.classList.remove("running");
-  enableEnvironmentControls(false);
+  updateEnvironmentControls();
+  setTerminalState("disconnected");
   ["processes", "files", "network"].forEach((id) => {
     const container = document.querySelector(`#${id}`);
     container.classList.add("empty");
@@ -164,12 +198,32 @@ function resetEnvironment() {
   elements.warnings.hidden = true;
 }
 
-function enableEnvironmentControls(enabled) {
-  elements.destroy.disabled = !enabled;
-  elements.refresh.disabled = !enabled;
-  elements.command.disabled = !enabled;
-  elements.run.disabled = !enabled;
-  elements.create.disabled = enabled;
+function updateEnvironmentControls() {
+  const hasEnvironment = Boolean(environmentId);
+  elements.destroy.disabled = !hasEnvironment || destroying;
+  elements.refresh.disabled = !hasEnvironment || destroying;
+  elements.create.disabled = hasEnvironment;
+  updateTerminalControls();
+}
+
+function updateTerminalControls() {
+  const ready = Boolean(environmentId) && !destroying && socket?.readyState === WebSocket.OPEN;
+  elements.command.disabled = !ready;
+  elements.run.disabled = !ready;
+  const canReconnect = Boolean(environmentId) && !destroying && terminalState === "disconnected";
+  elements.reconnect.hidden = !canReconnect;
+  elements.reconnect.disabled = !canReconnect;
+}
+
+function setTerminalState(state) {
+  terminalState = state;
+  elements.terminalStatus.dataset.state = state;
+  elements.terminalStatus.textContent = state[0].toUpperCase() + state.slice(1);
+  updateTerminalControls();
+}
+
+function isCurrentSocket(candidate, id) {
+  return socket === candidate && environmentId === id;
 }
 
 function setBusy(busy, label = "") {

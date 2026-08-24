@@ -43,12 +43,16 @@
               <p class="panel-index">Live / shell</p>
               <h2>Terminal</h2>
             </div>
-            <span class="container-label" id="environment-id">waiting for environment</span>
+            <div class="terminal-meta">
+              <span id="terminal-status" class="terminal-status" data-state="disconnected" aria-live="polite">Disconnected</span>
+              <span class="container-label" id="environment-id">waiting for environment</span>
+            </div>
           </header>
           <pre id="terminal-output" class="terminal-output" tabindex="0" aria-label="Terminal output">Create an environment to open the shell.</pre>
           <form id="terminal-form" class="command-line">
             <label for="command" aria-label="Shell command">$</label>
             <input id="command" name="command" type="text" autocomplete="off" spellcheck="false" placeholder="printf 'hello, system\n'" disabled>
+            <button id="reconnect" type="button" hidden>Reconnect</button>
             <button type="submit" disabled>Run</button>
           </form>
         </article>

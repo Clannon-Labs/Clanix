@@ -81,13 +81,20 @@ h1 { max-width: 820px; margin: 0; font-family: var(--display); font-size: clamp(
 .terminal-panel { display: grid; grid-template-rows: auto 1fr auto; background: var(--terminal); color: var(--terminal-ink); }
 .panel-header { min-height: 82px; display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 18px 22px; border-bottom: 1px solid rgba(216, 245, 233, .2); }
 .panel-header h2 { margin: 0; font-family: var(--display); font-size: 1.45rem; letter-spacing: -.035em; }
-.container-label { max-width: 50%; color: #90b7ad; font-family: var(--mono); font-size: .68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-meta { min-width: 0; max-width: 50%; display: grid; justify-items: end; gap: 7px; }
+.container-label { max-width: 100%; color: #90b7ad; font-family: var(--mono); font-size: .68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-status { display: inline-flex; align-items: center; gap: 7px; color: #90b7ad; font-family: var(--mono); font-size: .62rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.terminal-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #90b7ad; }
+.terminal-status[data-state="connecting"]::before { background: #d7a53f; }
+.terminal-status[data-state="ready"]::before { background: var(--sea-glass); }
 .terminal-output { min-height: 440px; max-height: 560px; margin: 0; padding: 26px; overflow: auto; color: var(--terminal-ink); font-family: var(--mono); font-size: .88rem; line-height: 1.62; white-space: pre-wrap; overflow-wrap: anywhere; }
-.command-line { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 11px; padding: 14px 18px; border-top: 1px solid rgba(216, 245, 233, .2); background: rgba(255,255,255,.025); font-family: var(--mono); }
+.command-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 11px; padding: 14px 18px; border-top: 1px solid rgba(216, 245, 233, .2); background: rgba(255,255,255,.025); font-family: var(--mono); }
 .command-line label { color: var(--sea-glass); font-weight: 700; }
 .command-line input { min-width: 0; padding: 10px 0; border: 0; color: white; background: transparent; outline: 0; font-family: var(--mono); }
 .command-line input::placeholder { color: #729087; }
 .command-line button { padding: 8px 13px; color: var(--terminal-ink); border-color: #75988f; background: transparent; }
+.command-line button[type="submit"] { grid-column: -2; }
+.command-line button[hidden] { display: none; }
 
 .evidence-panel { overflow: hidden; background: var(--paper); border-left: 1px solid var(--ink); }
 .evidence-header { border-color: var(--line); }

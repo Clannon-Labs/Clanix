@@ -7,16 +7,20 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use axum::http::StatusCode;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
-use crate::{error::AppError, podman};
+use crate::{
+    error::{RuntimeError, RuntimeErrorKind},
+    observation::{self, ObservationSnapshot},
+    podman,
+    terminal::{self, TerminalReservation},
+};
 
 const MAX_TRANSCRIPT_ENTRIES: usize = 500;
 
 #[derive(Clone)]
-pub(crate) struct AppState {
+pub struct Runtime {
     inner: Arc<StateInner>,
 }
 
@@ -41,8 +45,8 @@ pub(crate) struct TranscriptEntry {
     data: String,
 }
 
-impl AppState {
-    pub(crate) fn new(image: String) -> Self {
+impl Runtime {
+    pub fn new(image: String) -> Self {
         let started_at = now_ms();
         Self {
             inner: Arc::new(StateInner {
@@ -54,7 +58,11 @@ impl AppState {
         }
     }
 
-    pub(crate) async fn create(&self) -> Result<String, AppError> {
+    pub async fn verify_rootless() -> Result<(), String> {
+        podman::verify_rootless().await
+    }
+
+    pub async fn create(&self) -> Result<String, RuntimeError> {
         let sequence = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let id = format!("env-{sequence:08x}");
         let container_name = format!("{}-{sequence:08x}", self.inner.container_prefix);
@@ -76,24 +84,26 @@ impl AppState {
         Ok(id)
     }
 
-    pub(crate) async fn find(&self, id: &str) -> Result<Arc<Environment>, AppError> {
+    async fn find(&self, id: &str) -> Result<Arc<Environment>, RuntimeError> {
         self.inner
             .environments
             .lock()
             .await
             .get(id)
             .cloned()
-            .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "environment not found"))
+            .ok_or_else(|| RuntimeError::new(RuntimeErrorKind::NotFound, "environment not found"))
     }
 
-    pub(crate) async fn destroy(&self, id: String) -> Result<(), AppError> {
+    pub async fn destroy(&self, id: String) -> Result<(), RuntimeError> {
         let environment = self
             .inner
             .environments
             .lock()
             .await
             .remove(&id)
-            .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "environment not found"))?;
+            .ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorKind::NotFound, "environment not found")
+            })?;
 
         if let Err(error) = podman::remove_container(environment.container_name()).await {
             // Keep ownership when Podman fails so the user can retry destruction
@@ -105,7 +115,15 @@ impl AppState {
         Ok(())
     }
 
-    pub(crate) async fn cleanup(&self) {
+    pub async fn observe(&self, id: &str) -> Result<ObservationSnapshot, RuntimeError> {
+        Ok(observation::collect(self.find(id).await?).await)
+    }
+
+    pub async fn reserve_terminal(&self, id: &str) -> Result<TerminalReservation, RuntimeError> {
+        terminal::reserve(self.find(id).await?)
+    }
+
+    pub async fn cleanup(&self) {
         let environments: Vec<_> = self
             .inner
             .environments

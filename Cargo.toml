@@ -1,12 +1,20 @@
-[package]
-name = "clannon"
+[workspace]
+resolver = "3"
+members = [
+    "crates/runtime",
+    "crates/server",
+]
+default-members = ["crates/server"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "A tiny interactive environment for inspecting real software execution"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 
-[dependencies]
+[workspace.dependencies]
 axum = { version = "0.8.9", features = ["ws"] }
+runtime = { path = "crates/runtime" }
 futures-util = "0.3.31"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

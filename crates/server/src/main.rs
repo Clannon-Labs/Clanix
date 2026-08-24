@@ -1,12 +1,9 @@
 use std::net::SocketAddr;
 
-use environment::AppState;
+use runtime::Runtime;
 
 mod app;
-mod environment;
 mod error;
-mod observation;
-mod podman;
 mod terminal;
 
 const DEFAULT_BIND: &str = "127.0.0.1:3000";
@@ -21,12 +18,12 @@ async fn main() {
         std::process::exit(2);
     });
 
-    if let Err(error) = podman::verify_rootless().await {
+    if let Err(error) = Runtime::verify_rootless().await {
         eprintln!("Clannon requires a working rootless Podman installation: {error}");
         std::process::exit(1);
     }
 
-    let state = AppState::new(image);
+    let state = Runtime::new(image);
     let router = app::routes(state.clone());
     let listener = tokio::net::TcpListener::bind(address)
         .await
@@ -45,7 +42,7 @@ async fn main() {
     }
 }
 
-async fn shutdown_and_cleanup(state: AppState) {
+async fn shutdown_and_cleanup(state: Runtime) {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
     };

@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[derive(Serialize)]
-pub(crate) struct ObservationSnapshot {
+pub struct ObservationSnapshot {
     environment_id: String,
     captured_at_ms: u128,
     transcript: Vec<TranscriptEntry>,

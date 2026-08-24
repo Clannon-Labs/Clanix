@@ -38,25 +38,25 @@ Read `PROJECT.md` before changing product behavior.
 - Add a dependency only when it materially shortens or secures the acceptance
   path. Do not add providers, plugin systems, queues, databases, or deployment
   machinery speculatively.
-- Exercise the user-visible path and run `cargo test` before declaring work done.
+- Exercise the user-visible path and run `cargo test --workspace` before declaring
+  work done.
 
 ## Repository map
 
-- `src/main.rs`: process bootstrap, configuration, and shutdown signals.
-- `src/app.rs`: HTTP routes, static assets, and request handlers.
-- `src/environment.rs`: environment lifecycle state and terminal transcript.
-- `src/terminal.rs`: WebSocket-to-container terminal bridge.
-- `src/observation.rs`: observation collection, data shapes, and parsers.
-- `src/podman.rs`: rootless Podman command boundary.
-- `src/error.rs`: HTTP error response mapping.
+- `Cargo.toml`: virtual workspace; the server is the default member.
+- `crates/server/`: the sole `clannon` binary, HTTP/WebSocket adapters,
+  static assets, error mapping, configuration, and shutdown signals.
+- `crates/runtime/`: transport-neutral environment lifecycle, terminal
+  sessions, observations, and the private rootless Podman command boundary.
 - `static/`: dependency-free browser UI.
+- `tests/smoke.sh`: opt-in real Podman lifecycle proof.
 - `PROJECT.md`: product mission, V0 contract, and architectural boundaries.
 
 ## Commands
 
 ```sh
 cargo run
-cargo test
+cargo test --workspace
 ```
 
 The server binds to `127.0.0.1:3000` by default. `CLANNON_BIND` and

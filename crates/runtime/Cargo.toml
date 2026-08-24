@@ -1,0 +1,12 @@
+[package]
+name = "runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "The local rootless Podman execution runtime for Clannon"
+license.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+tokio.workspace = true

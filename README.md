@@ -54,7 +54,7 @@ CLANNON_IMAGE=docker.io/library/alpine:3.20 cargo run
 ## Verify
 
 ```sh
-cargo test
+cargo test --workspace
 ./tests/smoke.sh
 ```
 

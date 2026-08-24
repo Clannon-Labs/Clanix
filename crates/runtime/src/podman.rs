@@ -1,9 +1,8 @@
 use std::{io, process::Stdio};
 
-use axum::http::StatusCode;
 use tokio::process::{Child, Command};
 
-use crate::error::AppError;
+use crate::error::{RuntimeError, RuntimeErrorKind};
 
 pub(crate) async fn verify_rootless() -> Result<(), String> {
     let output = Command::new("podman")
@@ -20,7 +19,7 @@ pub(crate) async fn verify_rootless() -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) async fn create_container(name: &str, image: &str) -> Result<(), AppError> {
+pub(crate) async fn create_container(name: &str, image: &str) -> Result<(), RuntimeError> {
     let output = Command::new("podman")
         .args([
             "run",
@@ -43,7 +42,7 @@ pub(crate) async fn create_container(name: &str, image: &str) -> Result<(), AppE
         ])
         .output()
         .await
-        .map_err(|error| AppError::internal("could not start Podman", error))?;
+        .map_err(|error| RuntimeError::internal("could not start Podman", error))?;
 
     if output.status.success() {
         Ok(())
@@ -71,12 +70,12 @@ pub(crate) fn spawn_terminal(container: &str) -> io::Result<Child> {
         .spawn()
 }
 
-pub(crate) async fn exec(container: &str, script: &str) -> Result<String, AppError> {
+pub(crate) async fn exec(container: &str, script: &str) -> Result<String, RuntimeError> {
     let output = Command::new("podman")
         .args(["exec", container, "/bin/sh", "-c", script])
         .output()
         .await
-        .map_err(|error| AppError::internal("could not inspect environment", error))?;
+        .map_err(|error| RuntimeError::internal("could not inspect environment", error))?;
     if !output.status.success() {
         return Err(command_error(
             "environment inspection failed",
@@ -86,12 +85,12 @@ pub(crate) async fn exec(container: &str, script: &str) -> Result<String, AppErr
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-pub(crate) async fn remove_container(name: &str) -> Result<(), AppError> {
+pub(crate) async fn remove_container(name: &str) -> Result<(), RuntimeError> {
     let output = Command::new("podman")
         .args(["rm", "--force", "--ignore", name])
         .output()
         .await
-        .map_err(|error| AppError::internal("could not destroy environment", error))?;
+        .map_err(|error| RuntimeError::internal("could not destroy environment", error))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -102,10 +101,10 @@ pub(crate) async fn remove_container(name: &str) -> Result<(), AppError> {
     }
 }
 
-fn command_error(context: &str, stderr: &[u8]) -> AppError {
+fn command_error(context: &str, stderr: &[u8]) -> RuntimeError {
     let detail = String::from_utf8_lossy(stderr).trim().to_owned();
-    AppError::new(
-        StatusCode::BAD_GATEWAY,
+    RuntimeError::new(
+        RuntimeErrorKind::BadGateway,
         if detail.is_empty() {
             context.to_owned()
         } else {

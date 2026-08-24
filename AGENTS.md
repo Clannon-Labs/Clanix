@@ -42,7 +42,13 @@ Read `PROJECT.md` before changing product behavior.
 
 ## Repository map
 
-- `src/main.rs`: HTTP/WebSocket application and container lifecycle.
+- `src/main.rs`: process bootstrap, configuration, and shutdown signals.
+- `src/app.rs`: HTTP routes, static assets, and request handlers.
+- `src/environment.rs`: environment lifecycle state and terminal transcript.
+- `src/terminal.rs`: WebSocket-to-container terminal bridge.
+- `src/observation.rs`: observation collection, data shapes, and parsers.
+- `src/podman.rs`: rootless Podman command boundary.
+- `src/error.rs`: HTTP error response mapping.
 - `static/`: dependency-free browser UI.
 - `PROJECT.md`: product mission, V0 contract, and architectural boundaries.
 

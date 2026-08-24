@@ -310,8 +310,20 @@ async fn destroy_environment(
         .remove(&id)
         .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "environment not found"))?;
 
-    remove_container(&environment.container_name).await?;
-    Ok(StatusCode::NO_CONTENT)
+    match remove_container(&environment.container_name).await {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(error) => {
+            // Keep ownership when Podman fails so the user can retry destruction
+            // instead of leaving an unreachable container behind.
+            state
+                .inner
+                .environments
+                .lock()
+                .await
+                .insert(id, environment);
+            Err(error)
+        }
+    }
 }
 
 async fn terminal(

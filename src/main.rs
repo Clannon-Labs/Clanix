@@ -265,6 +265,8 @@ async fn create_environment(State(state): State<AppState>) -> Result<impl IntoRe
             "--pids-limit=256",
             "--memory=512m",
             "--cpus=1",
+            "--tmpfs",
+            "/workspace:rw,exec,nosuid,size=256m",
             "--workdir=/workspace",
             &state.inner.image,
             "/bin/sh",
@@ -394,10 +396,14 @@ async fn terminal_session(socket: WebSocket, environment: Arc<Environment>) {
                         record_transcript(&environment, "input", text).await;
                         if stdin.write_all(&bytes).await.is_err() { break; }
                     }
-                    Some(Ok(Message::Ping(bytes))) => {
-                        if sender.send(Message::Pong(bytes)).await.is_err() { break; }
+                    Some(Ok(Message::Ping(_))) => {
+                        if sender.flush().await.is_err() { break; }
                     }
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    Some(Ok(Message::Close(_))) => {
+                        let _ = sender.flush().await;
+                        break;
+                    }
+                    None | Some(Err(_)) => break,
                     Some(Ok(Message::Pong(_))) => {}
                 }
             }
@@ -457,18 +463,15 @@ async fn observations(
     let environment = state.find(&id).await?;
     let mut warnings = Vec::new();
 
-    let processes = match exec_in_container(
-        &environment.container_name,
-        "ps -o pid,ppid,state,comm,args",
-    )
-    .await
-    {
-        Ok(raw) => parse_processes(&raw),
-        Err(error) => {
-            warnings.push(error.message);
-            Vec::new()
-        }
-    };
+    let processes =
+        match exec_in_container(&environment.container_name, "ps -o pid,ppid,stat,comm,args").await
+        {
+            Ok(raw) => parse_processes(&raw),
+            Err(error) => {
+                warnings.push(error.message);
+                Vec::new()
+            }
+        };
     let files = match exec_in_container(
         &environment.container_name,
         "find /workspace -mindepth 1 -maxdepth 4 -exec stat -c '%n|%s|%Y|%F' '{}' ';' 2>/dev/null | head -200",

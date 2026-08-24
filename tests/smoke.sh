@@ -23,7 +23,7 @@ trap cleanup EXIT
 
 cd "$project_dir"
 cargo build --quiet
-CLANNON_BIND="$bind_address" cargo run --quiet >"$server_log" 2>&1 &
+CLANNON_BIND="$bind_address" target/debug/clannon >"$server_log" 2>&1 &
 server_pid=$!
 
 for _ in $(seq 1 120); do
@@ -38,7 +38,11 @@ for _ in $(seq 1 120); do
 done
 curl --silent --fail "$base_url/" >/dev/null
 
-create_response=$(curl --silent --fail --request POST "$base_url/api/environments")
+if ! create_response=$(curl --silent --show-error --fail-with-body --request POST "$base_url/api/environments"); then
+  printf '%s\n' "$create_response" >&2
+  cat "$server_log" >&2
+  exit 1
+fi
 environment_id=$(node -e 'const d=JSON.parse(process.argv[1]); if(!d.id) process.exit(1); process.stdout.write(d.id)' "$create_response")
 
 BASE_URL="$base_url" ENVIRONMENT_ID="$environment_id" node <<'NODE'

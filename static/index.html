@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Run software in a disposable Linux environment and inspect what actually happened.">
+    <title>Clannon — inspect real execution</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="masthead">
+      <a class="wordmark" href="/" aria-label="Clannon home">Clannon<span class="cursor" aria-hidden="true">_</span></a>
+      <p class="thesis">Software is easier to understand when you can see it run.</p>
+      <div class="environment-state" aria-live="polite">
+        <span id="state-dot" class="state-dot"></span>
+        <span id="state-label">No environment</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="intro-title">
+        <div>
+          <p class="eyebrow">Execution workbench · local V0</p>
+          <h1 id="intro-title">Run it. Watch what the system does.</h1>
+        </div>
+        <div class="intro-actions">
+          <p>Start a disposable Linux environment, run ordinary shell commands, then inspect its process, file, network, and transcript evidence.</p>
+          <div class="buttons">
+            <button id="create" class="primary">Create environment</button>
+            <button id="destroy" class="quiet" disabled>Destroy</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="runtime-line" aria-hidden="true">
+        <span>command</span><i></i><span>execution</span><i></i><span>evidence</span>
+      </div>
+
+      <section class="workbench" aria-label="Execution workbench">
+        <article class="terminal-panel">
+          <header class="panel-header">
+            <div>
+              <p class="panel-index">Live / shell</p>
+              <h2>Terminal</h2>
+            </div>
+            <span class="container-label" id="environment-id">waiting for environment</span>
+          </header>
+          <pre id="terminal-output" class="terminal-output" tabindex="0" aria-label="Terminal output">Create an environment to open the shell.</pre>
+          <form id="terminal-form" class="command-line">
+            <label for="command" aria-label="Shell command">$</label>
+            <input id="command" name="command" type="text" autocomplete="off" spellcheck="false" placeholder="printf 'hello, system\n'" disabled>
+            <button type="submit" disabled>Run</button>
+          </form>
+        </article>
+
+        <aside class="evidence-panel" aria-labelledby="evidence-title">
+          <header class="panel-header evidence-header">
+            <div>
+              <p class="panel-index">Snapshot / now</p>
+              <h2 id="evidence-title">Evidence</h2>
+            </div>
+            <button id="refresh" class="refresh" disabled>Refresh</button>
+          </header>
+
+          <div id="warnings" class="warnings" hidden></div>
+          <section class="observation" aria-labelledby="process-title">
+            <h3 id="process-title">Processes <span id="process-count">0</span></h3>
+            <div id="processes" class="observation-body empty">No snapshot yet.</div>
+          </section>
+          <section class="observation" aria-labelledby="file-title">
+            <h3 id="file-title">Workspace files <span id="file-count">0</span></h3>
+            <div id="files" class="observation-body empty">No snapshot yet.</div>
+          </section>
+          <section class="observation" aria-labelledby="network-title">
+            <h3 id="network-title">Network sockets <span id="network-count">0</span></h3>
+            <div id="network" class="observation-body empty">No snapshot yet.</div>
+          </section>
+          <p class="snapshot-time" id="snapshot-time">Evidence appears after the environment starts.</p>
+        </aside>
+      </section>
+    </main>
+
+    <footer>
+      <span>Clannon.com · hosted product direction</span>
+      <span>Clannonic.org · future open-source runtime</span>
+    </footer>
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -41,13 +41,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if [[ -n "$server_binary" ]]; then
+  if [[ ! -x "$server_binary" ]]; then
+    printf 'CLANNON_SMOKE_BINARY is not executable: %s\n' "$server_binary" >&2
+    exit 1
+  fi
+  server_binary=$(realpath "$server_binary")
+fi
 cd "$project_dir"
 if [[ -z "$server_binary" ]]; then
   cargo build --quiet
   server_binary="$project_dir/target/debug/clannon"
-elif [[ ! -x "$server_binary" ]]; then
-  printf 'CLANNON_SMOKE_BINARY is not executable: %s\n' "$server_binary" >&2
-  exit 1
 fi
 CLANNON_BIND="$bind_address" "$server_binary" >"$server_log" 2>&1 &
 server_pid=$!

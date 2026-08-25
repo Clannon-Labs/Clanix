@@ -4,6 +4,10 @@ set -euo pipefail
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 target=${1:-x86_64-unknown-linux-musl}
 output_directory=${2:-"$repository_root/dist"}
+if [[ "$target" != "x86_64-unknown-linux-musl" ]]; then
+    echo "unsupported release target: $target" >&2
+    exit 2
+fi
 binary=${CLANNON_RELEASE_BINARY:-"$repository_root/target/$target/release/clannon"}
 
 version=$(python3 - "$repository_root/Cargo.toml" <<'PY'

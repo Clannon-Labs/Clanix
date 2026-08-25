@@ -105,7 +105,7 @@ if (!hasProofFile || !hasCommand || !hasOutput || !timestampsAreValid || !timest
 }
 NODE
 
-curl --silent --fail --request DELETE "$base_url/api/environments/$environment_id" >/dev/null
+curl --silent --fail --max-time 5 --request DELETE "$base_url/api/environments/$environment_id" >/dev/null
 status=$(curl --silent --output /dev/null --write-out '%{http_code}' "$base_url/api/environments/$environment_id/observations")
 [[ "$status" == "404" ]]
 environment_id=""

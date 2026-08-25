@@ -34,15 +34,20 @@ struct StateInner {
 pub(crate) struct Environment {
     id: String,
     container_name: String,
-    transcript: Mutex<Vec<TranscriptEntry>>,
+    transcript: Arc<Transcript>,
     terminal_active: AtomicBool,
+    terminal: terminal::TerminalHub,
+}
+
+pub(crate) struct Transcript {
+    entries: Mutex<Vec<TranscriptEntry>>,
 }
 
 #[derive(Clone, Serialize)]
 pub(crate) struct TranscriptEntry {
-    timestamp_ms: u128,
-    direction: &'static str,
-    data: String,
+    pub(crate) timestamp_ms: u128,
+    pub(crate) direction: &'static str,
+    pub(crate) data: String,
 }
 
 impl Runtime {
@@ -69,11 +74,13 @@ impl Runtime {
 
         podman::create_container(&container_name, &self.inner.image).await?;
 
+        let transcript = Arc::new(Transcript::new());
         let environment = Arc::new(Environment {
             id: id.clone(),
             container_name,
-            transcript: Mutex::new(Vec::new()),
+            transcript: transcript.clone(),
             terminal_active: AtomicBool::new(false),
+            terminal: terminal::TerminalHub::new(transcript),
         });
         self.inner
             .environments
@@ -111,6 +118,10 @@ impl Runtime {
             self.inner.environments.lock().await.insert(id, environment);
             return Err(error);
         }
+        environment
+            .terminal()
+            .finish_after_container_removed()
+            .await;
 
         Ok(())
     }
@@ -132,13 +143,39 @@ impl Runtime {
             .drain()
             .map(|(_, environment)| environment)
             .collect();
+        let mut removals = Vec::with_capacity(environments.len());
         for environment in environments {
-            let _ = podman::remove_container(environment.container_name()).await;
+            let removed = podman::remove_container(environment.container_name())
+                .await
+                .is_ok();
+            removals.push((environment, removed));
+        }
+        for (environment, removed) in removals {
+            if removed {
+                environment
+                    .terminal()
+                    .finish_after_container_removed()
+                    .await;
+            } else {
+                environment.terminal().stop_and_reap().await;
+            }
         }
     }
 }
 
 impl Environment {
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Arc<Self> {
+        let transcript = Arc::new(Transcript::new());
+        Arc::new(Self {
+            id: "test".into(),
+            container_name: "none".into(),
+            transcript: transcript.clone(),
+            terminal_active: AtomicBool::new(false),
+            terminal: terminal::TerminalHub::new(transcript),
+        })
+    }
+
     pub(crate) fn id(&self) -> &str {
         &self.id
     }
@@ -156,20 +193,40 @@ impl Environment {
     }
 
     pub(crate) async fn record_transcript(&self, direction: &'static str, data: String) {
-        let mut transcript = self.transcript.lock().await;
-        transcript.push(TranscriptEntry {
+        self.transcript.record(direction, data).await;
+    }
+
+    pub(crate) fn terminal(&self) -> &terminal::TerminalHub {
+        &self.terminal
+    }
+
+    pub(crate) async fn transcript_snapshot(&self) -> Vec<TranscriptEntry> {
+        self.transcript.snapshot().await
+    }
+}
+
+impl Transcript {
+    fn new() -> Self {
+        Self {
+            entries: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub(crate) async fn record(&self, direction: &'static str, data: String) {
+        let mut entries = self.entries.lock().await;
+        entries.push(TranscriptEntry {
             timestamp_ms: now_ms(),
             direction,
             data,
         });
-        if transcript.len() > MAX_TRANSCRIPT_ENTRIES {
-            let excess = transcript.len() - MAX_TRANSCRIPT_ENTRIES;
-            transcript.drain(..excess);
+        if entries.len() > MAX_TRANSCRIPT_ENTRIES {
+            let excess = entries.len() - MAX_TRANSCRIPT_ENTRIES;
+            entries.drain(..excess);
         }
     }
 
-    pub(crate) async fn transcript_snapshot(&self) -> Vec<TranscriptEntry> {
-        self.transcript.lock().await.clone()
+    pub(crate) async fn snapshot(&self) -> Vec<TranscriptEntry> {
+        self.entries.lock().await.clone()
     }
 }
 
@@ -188,22 +245,15 @@ mod tests {
     fn caps_transcript_without_losing_newest_entries() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let environment = Environment {
-                id: "test".into(),
-                container_name: "none".into(),
-                transcript: Mutex::new(Vec::new()),
-                terminal_active: AtomicBool::new(false),
-            };
+            let transcript = Transcript::new();
             for index in 0..=MAX_TRANSCRIPT_ENTRIES {
-                environment
-                    .record_transcript("output", index.to_string())
-                    .await;
+                transcript.record("output", index.to_string()).await;
             }
-            let transcript = environment.transcript.lock().await;
-            assert_eq!(transcript.len(), MAX_TRANSCRIPT_ENTRIES);
-            assert_eq!(transcript.first().unwrap().data, "1");
+            let entries = transcript.entries.lock().await;
+            assert_eq!(entries.len(), MAX_TRANSCRIPT_ENTRIES);
+            assert_eq!(entries.first().unwrap().data, "1");
             assert_eq!(
-                transcript.last().unwrap().data,
+                entries.last().unwrap().data,
                 MAX_TRANSCRIPT_ENTRIES.to_string()
             );
         });

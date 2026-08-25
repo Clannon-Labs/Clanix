@@ -67,6 +67,7 @@ pub(crate) fn spawn_terminal(container: &str) -> io::Result<Child> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
 }
 
@@ -87,7 +88,7 @@ pub(crate) async fn exec(container: &str, script: &str) -> Result<String, Runtim
 
 pub(crate) async fn remove_container(name: &str) -> Result<(), RuntimeError> {
     let output = Command::new("podman")
-        .args(["rm", "--force", "--ignore", name])
+        .args(["rm", "--force", "--ignore", "--time=1", name])
         .output()
         .await
         .map_err(|error| RuntimeError::internal("could not destroy environment", error))?;

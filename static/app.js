@@ -661,6 +661,73 @@ function executionEventPresentation(event) {
     }
     case "shell_failed":
       return { label: "Shell failed", detail: generation, outcome: "failed" };
+    case "process_added":
+      return sampledExecutionPresentation(
+        "Process appeared",
+        event,
+        processSubject(event.process),
+        processFacts(event.process),
+      );
+    case "process_removed":
+      return sampledExecutionPresentation(
+        "Process disappeared",
+        event,
+        processSubject(event.process),
+        processFacts(event.process),
+      );
+    case "process_changed":
+      return sampledExecutionPresentation(
+        "Process changed",
+        event,
+        `pid ${executionValue(event.current?.pid ?? event.previous?.pid)}`,
+        changedObservationFacts(event.previous, event.current, [
+          ["pid", "pid", executionValue],
+          ["parent_pid", "parent", executionValue],
+          ["state", "state", executionValue],
+          ["command", "command", executionValue],
+          ["arguments", "arguments", formatObservedArguments],
+        ]),
+      );
+    case "file_added":
+      return sampledExecutionPresentation(
+        "File appeared",
+        event,
+        fileSubject(event.file),
+        fileFacts(event.file),
+      );
+    case "file_removed":
+      return sampledExecutionPresentation(
+        "File disappeared",
+        event,
+        fileSubject(event.file),
+        fileFacts(event.file),
+      );
+    case "file_changed":
+      return sampledExecutionPresentation(
+        "File changed",
+        event,
+        fileSubject(event.current ?? event.previous),
+        changedObservationFacts(event.previous, event.current, [
+          ["path", "path", formatObservedPath],
+          ["size_bytes", "size", formatObservedBytes],
+          ["modified_unix_seconds", "modified", formatObservedUnixSeconds],
+          ["kind", "kind", executionValue],
+        ]),
+      );
+    case "network_added":
+      return sampledExecutionPresentation(
+        "Socket appeared",
+        event,
+        socketSubject(event.network),
+        socketFacts(event.network),
+      );
+    case "network_removed":
+      return sampledExecutionPresentation(
+        "Socket disappeared",
+        event,
+        socketSubject(event.network),
+        socketFacts(event.network),
+      );
     default:
       return {
         label: "Unknown event",
@@ -668,6 +735,70 @@ function executionEventPresentation(event) {
         outcome: "unknown",
       };
   }
+}
+
+function sampledExecutionPresentation(label, event, subject, facts) {
+  return {
+    label,
+    detail: `${formatCaptureSequence(event.capture_sequence)} · ${subject}${facts ? ` · ${facts}` : ""}`,
+    outcome: "normal",
+  };
+}
+
+function formatCaptureSequence(captureSequence) {
+  return Number.isSafeInteger(captureSequence) && captureSequence >= 1
+    ? `sample #${captureSequence}`
+    : "sample #?";
+}
+
+function processSubject(process = {}) {
+  return `pid ${executionValue(process.pid)} · ${executionValue(process.command)}`;
+}
+
+function processFacts(process = {}) {
+  return `parent ${executionValue(process.parent_pid)} · state ${executionValue(process.state)} · arguments ${formatObservedArguments(process.arguments)}`;
+}
+
+function fileSubject(file = {}) {
+  return formatObservedPath(file.path);
+}
+
+function fileFacts(file = {}) {
+  return `${formatObservedBytes(file.size_bytes)} · ${executionValue(file.kind)} · modified ${formatObservedUnixSeconds(file.modified_unix_seconds)}`;
+}
+
+function socketSubject(socket = {}) {
+  return `${executionValue(socket.protocol)} · ${executionValue(socket.local_address)}`;
+}
+
+function socketFacts(socket = {}) {
+  return `remote ${executionValue(socket.remote_address)} · ${executionValue(socket.state)}`;
+}
+
+function changedObservationFacts(previous = {}, current = {}, fields) {
+  const changes = fields.flatMap(([key, label, formatter]) => previous?.[key] === current?.[key]
+    ? []
+    : [`${label} ${formatter(previous?.[key])} → ${formatter(current?.[key])}`]);
+  return changes.length ? changes.join(" · ") : "sampled fields unchanged";
+}
+
+function formatObservedArguments(argumentsValue) {
+  return argumentsValue === "" ? "—" : executionValue(argumentsValue);
+}
+
+function formatObservedPath(path) {
+  const value = executionValue(path);
+  return value.startsWith("/workspace/") ? value.slice("/workspace/".length) : value;
+}
+
+function formatObservedBytes(bytes) {
+  return Number.isSafeInteger(bytes) && bytes >= 0 ? formatBytes(bytes) : "unknown size";
+}
+
+function formatObservedUnixSeconds(seconds) {
+  if (!Number.isSafeInteger(seconds) || seconds < 0) return "unknown time";
+  const timestamp = new Date(seconds * 1000);
+  return Number.isNaN(timestamp.getTime()) ? "unknown time" : timestamp.toISOString();
 }
 
 function executionValue(value, fallback = "unknown") {

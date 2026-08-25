@@ -66,6 +66,7 @@ pub(crate) struct Environment {
     container_name: String,
     transcript: Arc<Transcript>,
     activity: Arc<ActivityLog>,
+    observation: Mutex<observation::ObservationState>,
     terminal_active: AtomicBool,
     terminal: terminal::TerminalHub,
     slot: StdMutex<Option<OwnedSemaphorePermit>>,
@@ -482,6 +483,7 @@ fn new_environment(
         container_name,
         transcript: transcript.clone(),
         activity: activity.clone(),
+        observation: Mutex::new(observation::ObservationState::new()),
         terminal_active: AtomicBool::new(false),
         terminal: terminal::TerminalHub::new(transcript, activity),
         slot: StdMutex::new(Some(slot)),
@@ -549,6 +551,7 @@ impl Environment {
             container_name: "none".into(),
             transcript: transcript.clone(),
             activity: activity.clone(),
+            observation: Mutex::new(observation::ObservationState::new()),
             terminal_active: AtomicBool::new(false),
             terminal: terminal::TerminalHub::new(transcript, activity),
             slot: StdMutex::new(None),
@@ -590,6 +593,14 @@ impl Environment {
 
     pub(crate) fn activity_snapshot(&self) -> (Vec<crate::activity::ExecutionEvent>, u64) {
         self.activity.snapshot()
+    }
+
+    pub(crate) fn activity(&self) -> &ActivityLog {
+        &self.activity
+    }
+
+    pub(crate) fn observation_state(&self) -> &Mutex<observation::ObservationState> {
+        &self.observation
     }
 
     pub(crate) fn terminal(&self) -> &terminal::TerminalHub {
@@ -688,6 +699,7 @@ mod tests {
             container_name: "none".into(),
             transcript: transcript.clone(),
             activity: activity.clone(),
+            observation: Mutex::new(observation::ObservationState::new()),
             terminal_active: AtomicBool::new(false),
             terminal: terminal::TerminalHub::new(transcript, activity),
             slot: StdMutex::new(Some(released_after_create_failure)),

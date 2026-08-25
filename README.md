@@ -12,8 +12,10 @@ decisions that keep the project small live in [`PROJECT.md`](PROJECT.md).
 - A Rust server creates and destroys rootless Podman containers.
 - A dependency-free browser UI drives a real, resizable container PTY over
   WebSockets, including Ctrl-C and reconnectable shell sessions.
-- Activity shows a timestamped, ordered tail of host-observed environment and
-  shell facts without pretending terminal input is a completed command.
+- Activity shows a timestamped, ordered tail of runtime-known environment and
+  shell facts plus process, file, and network changes detected between refresh
+  samples, without pretending input is a completed command or sampled changes
+  are continuous tracing.
 - Snapshot observations show the terminal transcript, processes, workspace files,
   and Linux TCP/UDP socket tables.
 - Guest outbound networking is disabled by default; loopback listeners inside
@@ -52,15 +54,19 @@ printf 'evidence\n' > note.txt
 sleep 30 &
 ```
 
-Refresh **Evidence** to see Activity, the resulting transcript, and the current
-file and process snapshot. Use **Destroy** when finished.
+Refresh **Evidence** once to establish the system baseline. Later refreshes show
+Activity events for process, workspace-file, and network facts that appeared,
+disappeared, or changed between successful samples, alongside the transcript and
+current snapshots. Use **Destroy** when finished.
 
 One server owns at most four environments that are creating, live, or awaiting
 cleanup. Transcript evidence is the newest retained tail, bounded to 500 whole
-entries and 1 MiB of UTF-8 entry data. Activity separately keeps the newest 500
-fixed-size events and reports how many earlier events were omitted. Event
-sequence defines order; timestamps are host observation times and may repeat or
-move with the host clock. Both tails are lost on destroy or restart. The opaque
+entries and 1 MiB of UTF-8 entry data. Activity separately keeps at most the
+newest 500 whole events and 1 MiB of estimated owned event data, and reports how
+many earlier events were omitted by either bound. Event sequence defines order;
+timestamps may repeat or move with the host clock. Runtime-known facts are
+timestamped when recorded; sampled-change events are timestamped when their
+capture completed. Both tails are lost on destroy or restart. The opaque
 environment ID is an identifier, not a credential; the private URL capability
 is what authorizes local API and terminal access.
 
@@ -86,8 +92,8 @@ cargo test --workspace
 
 Unit tests do not require Podman. The smoke test requires working rootless user
 namespaces and exercises create, PTY sizing and resize, foreground interruption,
-reconnection, ordered Activity semantics, observations, destroy, access-gate
-rejection, and rejection of the destroyed ID.
+reconnection, runtime-known and refresh-sampled Activity semantics, observations,
+destroy, access-gate rejection, and rejection of the destroyed ID.
 
 ## Current boundaries
 
@@ -95,6 +101,11 @@ This is a truthful V0: the shell runs on a real container PTY, while the browser
 shows a control-safe plain-text log rather than a full screen-terminal emulator.
 Activity records accepted input and shell/runtime facts; it does not parse
 commands, infer per-command completion, or connect input causally to output.
-Process, file, and network observations remain point-in-time snapshots rather
-than a timeline. Rootless Podman is useful isolation but not a hardened hostile
-multi-tenant security boundary. See `PROJECT.md` before widening the scope.
+Sampled system events mean only that a fact differed between successful refresh
+samples: they do not reveal causality or exact occurrence time, and short-lived
+facts may be missed. Each domain's first successful sample is only its baseline.
+A failed observation domain does not fabricate removals; a workspace capture
+over 200 files warns and preserves the prior file baseline. Process, file, and
+network observations remain current point-in-time snapshots. Rootless Podman is
+useful isolation but not a hardened hostile multi-tenant security boundary. See
+`PROJECT.md` before widening the scope.

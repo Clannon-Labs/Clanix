@@ -1121,6 +1121,119 @@ test("renders authoritative execution events in retained order", async () => {
   assert.doesNotMatch(terminal.executionEvents.innerHTML, /command (ran|completed)/i);
 });
 
+test("renders sampled observation events in server order without claiming lifecycle facts", async () => {
+  const timestamp = 1_700_000_100_000;
+  const process = { pid: 42, parent_pid: 1, state: "S", command: "worker", arguments: "--once" };
+  const file = { path: "/workspace/note.txt", size_bytes: 10, modified_unix_seconds: 1_700_000_000, kind: "regular file" };
+  const socket = { protocol: "tcp", local_address: "127.0.0.1:8080", remote_address: "0.0.0.0:0", state: "listening" };
+  const executionEvents = [
+    { sequence: 40, timestamp_ms: timestamp, type: "process_added", capture_sequence: 7, process },
+    { sequence: 41, timestamp_ms: timestamp, type: "process_removed", capture_sequence: 7, process },
+    {
+      sequence: 42,
+      timestamp_ms: timestamp,
+      type: "process_changed",
+      capture_sequence: 7,
+      previous: process,
+      current: { ...process, state: "R", arguments: "--watch" },
+    },
+    { sequence: 43, timestamp_ms: timestamp, type: "file_added", capture_sequence: 7, file },
+    { sequence: 44, timestamp_ms: timestamp, type: "file_removed", capture_sequence: 7, file },
+    {
+      sequence: 45,
+      timestamp_ms: timestamp,
+      type: "file_changed",
+      capture_sequence: 7,
+      previous: file,
+      current: { ...file, size_bytes: 2048 },
+    },
+    { sequence: 46, timestamp_ms: timestamp, type: "network_added", capture_sequence: 7, network: socket },
+    { sequence: 47, timestamp_ms: timestamp, type: "network_removed", capture_sequence: 7, network: socket },
+  ];
+  const terminal = await openTerminal(null, false, {
+    captured_at_ms: timestamp,
+    execution_events: executionEvents,
+    execution_events_omitted: 0,
+    files: [],
+    network: [],
+    processes: [],
+    transcript: [],
+    warnings: [],
+  });
+  const html = terminal.executionEvents.innerHTML;
+  const labels = [
+    "Process appeared",
+    "Process disappeared",
+    "Process changed",
+    "File appeared",
+    "File disappeared",
+    "File changed",
+    "Socket appeared",
+    "Socket disappeared",
+  ];
+
+  for (let index = 1; index < labels.length; index += 1) {
+    assert.ok(html.indexOf(labels[index - 1]) < html.indexOf(labels[index]));
+  }
+  assert.equal((html.match(/sample #7/g) ?? []).length, executionEvents.length);
+  assert.equal((html.match(/datetime="2023-[^"]+"/g) ?? []).length, executionEvents.length);
+  assert.match(html, /pid 42 · worker · parent 1 · state S · arguments --once/);
+  assert.match(html, /state S → R · arguments --once → --watch/);
+  assert.match(html, /note\.txt · 10 B · regular file/);
+  assert.match(html, /size 10 B → 2\.0 KiB/);
+  assert.match(html, /tcp · 127\.0\.0\.1:8080 · remote 0\.0\.0\.0:0 · listening/);
+  assert.doesNotMatch(html, /(Process|File|Socket) (started|stopped|created|deleted|opened|closed)/i);
+});
+
+test("projects and escapes every nested sampled observation string", async () => {
+  const maliciousEvents = [
+    {
+      sequence: 50,
+      timestamp_ms: 1_700_000_100_000,
+      type: "process_changed",
+      capture_sequence: 0,
+      previous: { pid: 9, parent_pid: 1, state: "S\u2066", command: "<old>\u202E", arguments: "safe" },
+      current: { pid: 9, parent_pid: 1, state: "R", command: "<new>", arguments: "\u0000<script>" },
+    },
+    {
+      sequence: 51,
+      timestamp_ms: 1_700_000_100_000,
+      type: "file_added",
+      capture_sequence: 8,
+      file: { path: "/workspace/<img>\u2066", size_bytes: 4, modified_unix_seconds: 1_700_000_000, kind: "regular\u202E" },
+    },
+    {
+      sequence: 52,
+      timestamp_ms: 1_700_000_100_000,
+      type: "network_removed",
+      capture_sequence: 8,
+      network: { protocol: "tcp<img>", local_address: "127.0.0.1:80\u202E", remote_address: "<svg>", state: "listen\u0007" },
+    },
+  ];
+  const terminal = await openTerminal(null, false, {
+    captured_at_ms: 1_700_000_100_000,
+    execution_events: maliciousEvents,
+    execution_events_omitted: 0,
+    files: [],
+    network: [],
+    processes: [],
+    transcript: [],
+    warnings: [],
+  });
+  const html = terminal.executionEvents.innerHTML;
+
+  assert.match(html, /sample #\?/);
+  assert.match(html, /&lt;old&gt;\[U\+202E\]/);
+  assert.match(html, /S\[U\+2066\]/);
+  assert.match(html, /␀&lt;script&gt;/);
+  assert.match(html, /&lt;img&gt;\[U\+2066\]/);
+  assert.match(html, /regular\[U\+202E\]/);
+  assert.match(html, /tcp&lt;img&gt;/);
+  assert.match(html, /127\.0\.0\.1:80\[U\+202E\]/);
+  assert.match(html, /remote &lt;svg&gt; · listen␇/);
+  assert.doesNotMatch(html, /<(?:old|new|script|img|svg)>|\u0000|\u0007|\u202e|\u2066/i);
+});
+
 test("shows runtime and browser omissions while safely preserving unknown events", async () => {
   const executionEvents = Array.from({ length: 102 }, (_, index) => ({
     sequence: index,

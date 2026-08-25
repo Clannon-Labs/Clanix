@@ -296,11 +296,66 @@ async function openTerminal(expectedResumed, columns, rows) {
 });
 NODE
 
-curl --silent --fail \
-  --header "Host: $authority" \
-  --header "Origin: $origin" \
-  --header "Authorization: Bearer $access_token" \
-  "$base_url/api/environments/$environment_id/observations" >"$snapshot_file"
+capture_observations() {
+  curl --silent --fail --max-time 10 \
+    --header "Host: $authority" \
+    --header "Origin: $origin" \
+    --header "Authorization: Bearer $access_token" \
+    "$base_url/api/environments/$environment_id/observations" >"$snapshot_file"
+}
+
+# The first successful capture is a baseline and must not invent historical
+# system changes from the environment's current contents.
+capture_observations
+node - "$snapshot_file" <<'NODE'
+const fs = require("node:fs");
+const snapshot = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const sampledTypes = /^(process|file|network)_(added|removed|changed)$/;
+if (!Array.isArray(snapshot.execution_events) ||
+    snapshot.execution_events.some((event) => sampledTypes.test(event.type))) {
+  console.error("first observation did not establish a clean sampled-change baseline");
+  process.exit(1);
+}
+NODE
+
+podman exec "$container_name" sh -c "printf x > /workspace/sampled-change.txt"
+podman exec --detach "$container_name" sh -c \
+  'echo $$ > /tmp/clannon-sampled.pid; exec sleep 97' >/dev/null
+for _ in $(seq 1 40); do
+  if podman exec "$container_name" sh -c \
+    'test -s /tmp/clannon-sampled.pid && kill -0 "$(cat /tmp/clannon-sampled.pid)"' 2>/dev/null; then
+    break
+  fi
+  sleep 0.05
+done
+if ! podman exec "$container_name" sh -c \
+  'test -s /tmp/clannon-sampled.pid && kill -0 "$(cat /tmp/clannon-sampled.pid)"'; then
+  printf 'sampled process did not become durable\n' >&2
+  exit 1
+fi
+capture_observations
+
+podman exec "$container_name" sh -c \
+  "printf 'sampled-change-expanded' > /workspace/sampled-change.txt"
+capture_observations
+
+podman exec "$container_name" sh -c \
+  'rm /workspace/sampled-change.txt; kill "$(cat /tmp/clannon-sampled.pid)"'
+for _ in $(seq 1 40); do
+  if ! podman exec "$container_name" sh -c \
+    'kill -0 "$(cat /tmp/clannon-sampled.pid)"' 2>/dev/null; then
+    break
+  fi
+  sleep 0.05
+done
+if podman exec "$container_name" sh -c \
+  'kill -0 "$(cat /tmp/clannon-sampled.pid)"' 2>/dev/null; then
+  printf 'sampled process did not stop\n' >&2
+  exit 1
+fi
+podman exec "$container_name" rm /tmp/clannon-sampled.pid
+capture_observations
+
 node - "$snapshot_file" <<'NODE'
 const fs = require("node:fs");
 const snapshot = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -322,15 +377,54 @@ const eventKeys = {
   terminal_resized: ["columns", "generation", "rows", "sequence", "timestamp_ms", "type"],
   shell_exited: ["code", "generation", "sequence", "timestamp_ms", "type"],
   shell_failed: ["generation", "sequence", "timestamp_ms", "type"],
+  process_added: ["capture_sequence", "process", "sequence", "timestamp_ms", "type"],
+  process_removed: ["capture_sequence", "process", "sequence", "timestamp_ms", "type"],
+  process_changed: ["capture_sequence", "current", "previous", "sequence", "timestamp_ms", "type"],
+  file_added: ["capture_sequence", "file", "sequence", "timestamp_ms", "type"],
+  file_removed: ["capture_sequence", "file", "sequence", "timestamp_ms", "type"],
+  file_changed: ["capture_sequence", "current", "previous", "sequence", "timestamp_ms", "type"],
+  network_added: ["capture_sequence", "network", "sequence", "timestamp_ms", "type"],
+  network_removed: ["capture_sequence", "network", "sequence", "timestamp_ms", "type"],
 };
 const hasExactKeys = (value, expected) =>
   value && typeof value === "object" && !Array.isArray(value) &&
   JSON.stringify(Object.keys(value).sort()) === JSON.stringify(expected);
+const processShapeIsValid = (process) => hasExactKeys(
+  process,
+  ["arguments", "command", "parent_pid", "pid", "state"],
+) && Number.isSafeInteger(process.pid) && process.pid > 0 &&
+  Number.isSafeInteger(process.parent_pid) && process.parent_pid >= 0 &&
+  [process.arguments, process.command, process.state].every((value) => typeof value === "string");
+const fileShapeIsValid = (file) => hasExactKeys(
+  file,
+  ["kind", "modified_unix_seconds", "path", "size_bytes"],
+) && Number.isSafeInteger(file.size_bytes) && file.size_bytes >= 0 &&
+  Number.isSafeInteger(file.modified_unix_seconds) && file.modified_unix_seconds >= 0 &&
+  typeof file.path === "string" && typeof file.kind === "string";
+const networkShapeIsValid = (network) => hasExactKeys(
+  network,
+  ["local_address", "protocol", "remote_address", "state"],
+) && [network.local_address, network.protocol, network.remote_address, network.state]
+  .every((value) => typeof value === "string");
 const executionEventShapesAreValid = hasExecutionEvents && executionEvents.every((event) => {
   const expected = eventKeys[event?.type];
   if (!expected || !hasExactKeys(event, expected)) return false;
   if (!Number.isSafeInteger(event.sequence) || event.sequence < 1 ||
       !Number.isSafeInteger(event.timestamp_ms) || event.timestamp_ms < 1) return false;
+  if (/^(process|file|network)_/.test(event.type)) {
+    if (!Number.isSafeInteger(event.capture_sequence) || event.capture_sequence < 1) return false;
+    if (event.type.startsWith("process_")) {
+      return event.type === "process_changed"
+        ? processShapeIsValid(event.previous) && processShapeIsValid(event.current)
+        : processShapeIsValid(event.process);
+    }
+    if (event.type.startsWith("file_")) {
+      return event.type === "file_changed"
+        ? fileShapeIsValid(event.previous) && fileShapeIsValid(event.current)
+        : fileShapeIsValid(event.file);
+    }
+    return networkShapeIsValid(event.network);
+  }
   if (event.type !== "environment_ready" &&
       (!Number.isSafeInteger(event.generation) || event.generation < 1)) return false;
   if (event.type === "shell_started" || event.type === "terminal_resized") {
@@ -417,10 +511,54 @@ activityCursor = findEventAfter(activityCursor, (event) =>
   event.bytes === Buffer.byteLength("printf 'fresh-proof:%s:%s\\n' \"$PWD\" \"${CLANNON_SMOKE_VAR-unset}\"\n")
 );
 const secondShellInputIndex = activityCursor;
+const sampledFilePath = "/workspace/sampled-change.txt";
+const sampledProcess = (process) => process.command === "sleep" &&
+  /(^|\s)97($|\s)/.test(process.arguments);
+const fileAddedIndex = executionEvents.findIndex((event) =>
+  event.type === "file_added" && event.file.path === sampledFilePath &&
+  event.file.size_bytes === Buffer.byteLength("x")
+);
+const fileChangedIndex = executionEvents.findIndex((event) =>
+  event.type === "file_changed" && event.previous.path === sampledFilePath &&
+  event.current.path === sampledFilePath &&
+  event.previous.size_bytes === Buffer.byteLength("x") &&
+  event.current.size_bytes === Buffer.byteLength("sampled-change-expanded")
+);
+const fileRemovedIndex = executionEvents.findIndex((event) =>
+  event.type === "file_removed" && event.file.path === sampledFilePath &&
+  event.file.size_bytes === Buffer.byteLength("sampled-change-expanded")
+);
+const processAddedIndex = executionEvents.findIndex((event) =>
+  event.type === "process_added" && sampledProcess(event.process)
+);
+const processRemovedIndex = executionEvents.findIndex((event) =>
+  event.type === "process_removed" && sampledProcess(event.process)
+);
+const fileAdded = executionEvents[fileAddedIndex];
+const fileChanged = executionEvents[fileChangedIndex];
+const fileRemoved = executionEvents[fileRemovedIndex];
+const processAdded = executionEvents[processAddedIndex];
+const processRemoved = executionEvents[processRemovedIndex];
+const sampledActivitySemanticsAreValid = [
+  fileAddedIndex,
+  fileChangedIndex,
+  fileRemovedIndex,
+  processAddedIndex,
+  processRemovedIndex,
+].every((index) => index >= 0) &&
+  fileAddedIndex < fileChangedIndex && fileChangedIndex < fileRemovedIndex &&
+  processAddedIndex < processRemovedIndex &&
+  fileAdded.capture_sequence === processAdded.capture_sequence &&
+  fileAdded.timestamp_ms === processAdded.timestamp_ms &&
+  fileAdded.capture_sequence < fileChanged.capture_sequence &&
+  fileChanged.capture_sequence < fileRemoved.capture_sequence &&
+  fileRemoved.capture_sequence === processRemoved.capture_sequence &&
+  fileRemoved.timestamp_ms === processRemoved.timestamp_ms &&
+  processAdded.process.pid === processRemoved.process.pid;
 const activitySemanticsAreValid = executionEventShapesAreValid &&
   executionEventSequencesAreOrdered && executionEventsOmitted === 0 &&
   executionEvents[0]?.sequence === 1 && environmentReadyIndex === 0 &&
-  secondShellInputIndex >= 0 &&
+  secondShellInputIndex >= 0 && sampledActivitySemanticsAreValid &&
   executionEvents.filter((event) => event.type === "shell_started" && event.generation === 1).length === 1 &&
   !executionEvents.some((event) => event.type === "shell_exited" && event.generation === 2) &&
   !executionEvents.some((event) => event.type === "shell_failed");
@@ -448,12 +586,23 @@ const hasTcpListener = snapshot.network.some((socket) =>
   socket.local_address === "127.0.0.1:23456" &&
   socket.state === "listening"
 );
-if (!activitySemanticsAreValid || !hasProofFile || !hasCommand || !hasDetachedOutput || !hasTtyProof || !hasInitialSize || !hasLoopbackProof || !hasResizeProof || !hasRawEtx || !hasAfterEtxProof || !hasReconnectSize || !hasResumeProof || !hasFreshProof || !timestampsAreValid || !timestampsAreOrdered || !hasSleep || !hasTcpListener) {
+const sampledFactsAreAbsent = !snapshot.files.some((file) => file.path === sampledFilePath) &&
+  !snapshot.processes.some(sampledProcess);
+if (!activitySemanticsAreValid || !sampledFactsAreAbsent || !hasProofFile || !hasCommand || !hasDetachedOutput || !hasTtyProof || !hasInitialSize || !hasLoopbackProof || !hasResizeProof || !hasRawEtx || !hasAfterEtxProof || !hasReconnectSize || !hasResumeProof || !hasFreshProof || !timestampsAreValid || !timestampsAreOrdered || !hasSleep || !hasTcpListener) {
   console.error(JSON.stringify({
     activitySemanticsAreValid,
     executionEventShapesAreValid,
     executionEventSequencesAreOrdered,
     executionEventsOmitted,
+    sampledActivitySemanticsAreValid,
+    sampledFactsAreAbsent,
+    sampledIndexes: {
+      fileAddedIndex,
+      fileChangedIndex,
+      fileRemovedIndex,
+      processAddedIndex,
+      processRemovedIndex,
+    },
     activityIndexes: {
       environmentReadyIndex,
       firstShellIndex,

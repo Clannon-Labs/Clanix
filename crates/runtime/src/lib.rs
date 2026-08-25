@@ -3,6 +3,7 @@ mod environment;
 mod error;
 mod observation;
 mod podman;
+mod system;
 mod terminal;
 
 pub use environment::Runtime;

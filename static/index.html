@@ -3,17 +3,34 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
     <meta name="description" content="Run software in a disposable Linux environment and inspect what actually happened.">
     <title>Clannon — inspect real execution</title>
+    <script>
+      try {
+        const savedTheme = localStorage.getItem("clannon-color-theme");
+        if (savedTheme === "light" || savedTheme === "dark") {
+          document.documentElement.dataset.theme = savedTheme;
+        }
+      } catch {}
+    </script>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <header class="masthead">
       <a class="wordmark" href="/" aria-label="Clannon home">Clannon<span class="cursor" aria-hidden="true">_</span></a>
       <p class="thesis">Software is easier to understand when you can see it run.</p>
-      <div class="environment-state" aria-live="polite">
-        <span id="state-dot" class="state-dot"></span>
-        <span id="state-label">No environment</span>
+      <div class="masthead-tools">
+        <div class="environment-state" aria-live="polite">
+          <span id="state-dot" class="state-dot"></span>
+          <span id="state-label">No environment</span>
+        </div>
+        <label for="color-theme" class="visually-hidden">Color theme</label>
+        <select id="color-theme" class="theme-select" name="color-theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
       </div>
     </header>
 

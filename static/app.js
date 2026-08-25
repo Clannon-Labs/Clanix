@@ -1,5 +1,6 @@
 const elements = {
   create: document.querySelector("#create"),
+  colorTheme: document.querySelector("#color-theme"),
   destroy: document.querySelector("#destroy"),
   refresh: document.querySelector("#refresh"),
   form: document.querySelector("#terminal-form"),
@@ -21,7 +22,9 @@ let socket = null;
 let terminalState = "disconnected";
 let destroying = false;
 
+setThemePreference(readThemePreference());
 elements.create.addEventListener("click", createEnvironment);
+elements.colorTheme.addEventListener("change", () => setThemePreference(elements.colorTheme.value, true));
 elements.destroy.addEventListener("click", destroyEnvironment);
 elements.refresh.addEventListener("click", refreshObservations);
 elements.form.addEventListener("submit", runCommand);
@@ -29,6 +32,29 @@ elements.command.addEventListener("keydown", handleCommandKeydown);
 elements.command.addEventListener("input", updateCommandComposer);
 elements.reconnect.addEventListener("click", () => connectTerminal(false));
 window.addEventListener("beforeunload", () => socket?.close());
+
+function readThemePreference() {
+  try {
+    const theme = localStorage.getItem("clannon-color-theme");
+    if (["system", "light", "dark"].includes(theme)) return theme;
+  } catch {}
+  return "system";
+}
+
+function setThemePreference(theme, persist = false) {
+  const preference = ["light", "dark"].includes(theme) ? theme : "system";
+  elements.colorTheme.value = preference;
+  if (preference === "system") {
+    delete document.documentElement.dataset.theme;
+  } else {
+    document.documentElement.dataset.theme = preference;
+  }
+  if (persist) {
+    try {
+      localStorage.setItem("clannon-color-theme", preference);
+    } catch {}
+  }
+}
 
 async function createEnvironment() {
   setBusy(true, "Starting isolated Linux…");

@@ -33,7 +33,7 @@ function createElement(textContent = "") {
   };
 }
 
-async function openTerminal() {
+async function openTerminal(storedTheme = null, storageFails = false) {
   const elements = new Map();
   const element = (selector, text = "") => {
     if (!elements.has(selector)) elements.set(selector, createElement(text));
@@ -44,6 +44,8 @@ async function openTerminal() {
   const command = element("#command");
   const output = element("#terminal-output", "Create an environment to open the shell.");
   const run = element("#terminal-form button[type='submit']");
+  const storedValues = new Map();
+  if (storedTheme !== null) storedValues.set("clannon-color-theme", storedTheme);
   form.requestSubmit = () => {
     void form.dispatch("submit", { preventDefault() {} });
   };
@@ -94,6 +96,7 @@ async function openTerminal() {
 
   const context = {
     document: {
+      documentElement: { dataset: {} },
       querySelector(selector) {
         return selector === "#terminal-form button[type='submit']" ? run : element(selector);
       },
@@ -105,6 +108,16 @@ async function openTerminal() {
       return response(200, emptySnapshot);
     },
     location: { host: "localhost", protocol: "http:" },
+    localStorage: {
+      getItem(key) {
+        if (storageFails) throw new Error("storage unavailable");
+        return storedValues.get(key) ?? null;
+      },
+      setItem(key, value) {
+        if (storageFails) throw new Error("storage unavailable");
+        storedValues.set(key, value);
+      },
+    },
     WebSocket: MockWebSocket,
     window: {
       addEventListener() {},
@@ -117,7 +130,16 @@ async function openTerminal() {
   await element("#create").dispatch("click");
   assert.equal(sockets.length, 1);
   sockets[0].open();
-  return { command, form, output, prompt: element("#command-prompt"), socket: sockets[0] };
+  return {
+    colorTheme: element("#color-theme"),
+    command,
+    documentElement: context.document.documentElement,
+    form,
+    output,
+    prompt: element("#command-prompt"),
+    socket: sockets[0],
+    storedValues,
+  };
 }
 
 function enterEvent(overrides = {}) {
@@ -205,4 +227,56 @@ test("renders Shift+Enter command lines as independent prompts", async () => {
 
   assert.deepEqual(terminal.socket.sent, ["echo one\necho two\n"]);
   assert.equal(terminal.output.textContent, "$ echo one\n$ echo two\n");
+});
+
+test("applies and persists validated color themes", async () => {
+  const terminal = await openTerminal("dark");
+  assert.equal(terminal.colorTheme.value, "dark");
+  assert.equal(terminal.documentElement.dataset.theme, "dark");
+
+  terminal.colorTheme.value = "light";
+  await terminal.colorTheme.dispatch("change");
+  assert.equal(terminal.documentElement.dataset.theme, "light");
+  assert.equal(terminal.storedValues.get("clannon-color-theme"), "light");
+
+  terminal.colorTheme.value = "system";
+  await terminal.colorTheme.dispatch("change");
+  assert.equal(terminal.documentElement.dataset.theme, undefined);
+  assert.equal(terminal.storedValues.get("clannon-color-theme"), "system");
+
+  const invalid = await openTerminal("sepia");
+  assert.equal(invalid.colorTheme.value, "system");
+  assert.equal(invalid.documentElement.dataset.theme, undefined);
+
+  const unavailable = await openTerminal(null, true);
+  unavailable.colorTheme.value = "dark";
+  await unavailable.colorTheme.dispatch("change");
+  assert.equal(unavailable.documentElement.dataset.theme, "dark");
+});
+
+test("boots a stored explicit theme before the stylesheet", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../static/index.html"), "utf8");
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  const bootstrap = html.indexOf(script);
+  const stylesheet = html.indexOf("/styles.css");
+  assert.ok(bootstrap < stylesheet);
+
+  const document = { documentElement: { dataset: {} } };
+  vm.runInNewContext(script, {
+    document,
+    localStorage: { getItem() { return "dark"; } },
+  });
+  assert.equal(document.documentElement.dataset.theme, "dark");
+});
+
+test("keeps the system and native theme-control contracts", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../static/index.html"), "utf8");
+  const styles = fs.readFileSync(path.join(__dirname, "../static/styles.css"), "utf8");
+
+  assert.match(html, /<label for="color-theme"[^>]*>Color theme<\/label>/);
+  for (const theme of ["system", "light", "dark"]) {
+    assert.match(html, new RegExp(`<option value="${theme}">`, "i"));
+  }
+  assert.match(styles, /@media \(prefers-color-scheme: dark\) {[\s\S]*:root:not\(\[data-theme\]\)/);
 });

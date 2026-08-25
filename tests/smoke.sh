@@ -106,6 +106,10 @@ if ! create_response=$(curl --silent --show-error --fail-with-body \
   exit 1
 fi
 environment_id=$(node -e 'const d=JSON.parse(process.argv[1]); if(!d.id) process.exit(1); process.stdout.write(d.id)' "$create_response")
+if [[ ! "$environment_id" =~ ^env-[0-9a-f]{32}$ ]]; then
+  printf 'environment ID is not an opaque 128-bit identifier: %s\n' "$environment_id" >&2
+  exit 1
+fi
 
 mapfile -t environment_containers < <(
   podman ps --format '{{.Names}}' | awk -v prefix="clannon-${server_pid}-" 'index($0, prefix) == 1'
@@ -116,6 +120,11 @@ if [[ "${#environment_containers[@]}" -ne 1 ]]; then
   exit 1
 fi
 container_name=${environment_containers[0]}
+network_mode=$(podman inspect --format '{{.HostConfig.NetworkMode}}' "$container_name")
+if [[ "$network_mode" != "none" ]]; then
+  printf 'expected guest network mode none, found %s\n' "$network_mode" >&2
+  exit 1
+fi
 
 BASE_URL="$base_url" ACCESS_TOKEN="$access_token" ENVIRONMENT_ID="$environment_id" node <<'NODE'
 const wsUrl = process.env.BASE_URL.replace(/^http/, "ws") +
@@ -193,7 +202,7 @@ async function openTerminal(expectedResumed, columns, rows) {
   const first = await openTerminal(false, 91, 33);
   first.socket.send(JSON.stringify({
     type: "input",
-    data: "for fd in 0 1; do test -t \"$fd\" || exit 91; done\nprintf 'tty-proof:%s\\n' \"$(tty)\"\nprintf 'initial-size:'; stty size\ncd /tmp\nexport CLANNON_SMOKE_VAR=preserved\nprintf 'smoke-proof\\n' > /workspace/proof.txt\nnohup sleep 20 >/dev/null 2>&1 &\nnohup nc -l -s 0.0.0.0 -p 23456 >/dev/null 2>&1 &\nfor delay in 1 2 3 4 5 6 7 8 9 10; do grep -q ':5BA0 ' /proc/net/tcp && break; sleep 0.1; done\n(sleep 1; printf '%s%s\\n' detached -proof) &\nCLANNON_ATTACHED=attached\nCLANNON_ATTACHED=\"${CLANNON_ATTACHED}-proof\"\nprintf '%s\\n' \"$CLANNON_ATTACHED\"\n",
+    data: "for fd in 0 1; do test -t \"$fd\" || exit 91; done\nprintf 'tty-proof:%s\\n' \"$(tty)\"\nprintf 'initial-size:'; stty size\ncd /tmp\nexport CLANNON_SMOKE_VAR=preserved\nprintf 'smoke-proof\\n' > /workspace/proof.txt\nrm -f /workspace/loopback-proof.txt\nnc -l -s 127.0.0.1 -p 23457 < /dev/null > /workspace/loopback-proof.txt &\nloopback_listener=$!\nfor attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do\n  if printf loopback-proof | nc -w 1 127.0.0.1 23457; then break; fi\n  sleep 0.05\ndone\nwait \"$loopback_listener\"\ntest \"$(cat /workspace/loopback-proof.txt)\" = loopback-proof || exit 92\nprintf 'loopback-proof-ok\\n'\nnohup sleep 20 >/dev/null 2>&1 &\nnohup nc -l -s 127.0.0.1 -p 23456 >/dev/null 2>&1 &\nfor delay in 1 2 3 4 5 6 7 8 9 10; do grep -q ':5BA0 ' /proc/net/tcp && break; sleep 0.1; done\n(sleep 1; printf '%s%s\\n' detached -proof) &\nCLANNON_ATTACHED=attached\nCLANNON_ATTACHED=\"${CLANNON_ATTACHED}-proof\"\nprintf '%s\\n' \"$CLANNON_ATTACHED\"\n",
   }));
   await waitUntil(
     () => /tty-proof:\/dev\/pts\/[0-9]+/.test(first.output),
@@ -202,6 +211,10 @@ async function openTerminal(expectedResumed, columns, rows) {
   await waitUntil(
     () => first.output.includes("initial-size:33 91"),
     "initial PTY dimensions",
+  );
+  await waitUntil(
+    () => first.output.includes("loopback-proof-ok"),
+    "guest loopback connection under network none",
   );
   await waitUntil(() => first.output.includes("attached-proof"), "initial terminal output");
 
@@ -253,10 +266,14 @@ async function openTerminal(expectedResumed, columns, rows) {
     "preserved working directory and shell variable",
   );
   resumed.socket.send(JSON.stringify({ type: "input", data: "exit 7\n" }));
-  await waitUntil(
-    () => resumed.controls.some((control) => control.type === "exit" && control.code === 7),
-    "structured shell exit",
-  );
+  try {
+    await waitUntil(
+      () => resumed.controls.some((control) => control.type === "exit" && control.code === 7),
+      "structured shell exit",
+    );
+  } catch (error) {
+    throw new Error(`${error.message}; output=${JSON.stringify(resumed.output)} controls=${JSON.stringify(resumed.controls)}`);
+  }
   await waitUntil(() => resumed.close !== null, "normal shell close");
   if (resumed.close.code !== 1000) {
     throw new Error(`shell exit closed with ${resumed.close.code}`);
@@ -300,6 +317,7 @@ const hasCommand = inputTranscript.includes("proof.txt");
 const hasDetachedOutput = outputTranscript.includes("detached-proof");
 const hasTtyProof = /tty-proof:\/dev\/pts\/[0-9]+/.test(outputTranscript);
 const hasInitialSize = outputTranscript.includes("initial-size:33 91");
+const hasLoopbackProof = outputTranscript.includes("loopback-proof-ok");
 const hasResizeProof = outputTranscript.includes("resized-size:41 117");
 const hasRawEtx = inputTranscript.includes("\u0003");
 const hasAfterEtxProof = outputTranscript.includes("after-etx:/tmp:preserved");
@@ -315,16 +333,17 @@ const timestampsAreOrdered = snapshot.transcript.every((entry, index, entries) =
 const hasSleep = snapshot.processes.some((process) => process.command === "sleep");
 const hasTcpListener = snapshot.network.some((socket) =>
   socket.protocol === "tcp" &&
-  socket.local_address === "0.0.0.0:23456" &&
+  socket.local_address === "127.0.0.1:23456" &&
   socket.state === "listening"
 );
-if (!hasProofFile || !hasCommand || !hasDetachedOutput || !hasTtyProof || !hasInitialSize || !hasResizeProof || !hasRawEtx || !hasAfterEtxProof || !hasReconnectSize || !hasResumeProof || !hasFreshProof || !timestampsAreValid || !timestampsAreOrdered || !hasSleep || !hasTcpListener) {
+if (!hasProofFile || !hasCommand || !hasDetachedOutput || !hasTtyProof || !hasInitialSize || !hasLoopbackProof || !hasResizeProof || !hasRawEtx || !hasAfterEtxProof || !hasReconnectSize || !hasResumeProof || !hasFreshProof || !timestampsAreValid || !timestampsAreOrdered || !hasSleep || !hasTcpListener) {
   console.error(JSON.stringify({
     hasProofFile,
     hasCommand,
     hasDetachedOutput,
     hasTtyProof,
     hasInitialSize,
+    hasLoopbackProof,
     hasResizeProof,
     hasRawEtx,
     hasAfterEtxProof,

@@ -36,6 +36,10 @@ does not call a model or generate explanations.
   server capability before runtime state is accessed.
 - **Create environment** starts a rootless Podman container with a writable
   `/workspace` and returns an opaque environment ID.
+- At most four environments may be creating, live, or awaiting cleanup at once;
+  a fifth create fails without starting another container.
+- Guest outbound networking is disabled. Loopback remains available inside the
+  container so local listeners still appear in network evidence.
 - The browser terminal drives `/bin/sh` on a real container PTY, including
   initial sizing, later resize controls, and raw control bytes such as Ctrl-C.
 - The observation endpoint returns JSON containing transcript, process, file,
@@ -56,6 +60,11 @@ recently captured output from the detached interval remains available subject
 to the transcript retention limit, but is not replayed into the reattached live
 stream. The dependency-free browser renders a control-safe plain-text PTY log;
 it is intentionally not a screen terminal emulator.
+
+The transcript is a retained newest tail, not an unlimited audit log. It keeps
+at most 500 whole entries and 1 MiB of UTF-8 entry data; the counts shown by the
+browser describe that retained tail. Environment IDs identify runtime objects,
+but only the server capability authorizes access to them.
 
 ## Architecture principles
 

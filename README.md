@@ -14,6 +14,8 @@ decisions that keep the project small live in [`PROJECT.md`](PROJECT.md).
   WebSockets, including Ctrl-C and reconnectable shell sessions.
 - Snapshot observations show the terminal transcript, processes, workspace files,
   and Linux TCP/UDP socket tables.
+- Guest outbound networking is disabled by default; loopback listeners inside
+  the disposable container continue to work and appear in evidence.
 - State is deliberately in memory; stopping the server cleans up its containers.
 
 ## Requirements
@@ -50,6 +52,12 @@ sleep 30 &
 
 Refresh **Evidence** to see the resulting transcript, file, and process snapshot.
 Use **Destroy** when finished.
+
+One server owns at most four environments that are creating, live, or awaiting
+cleanup. Transcript evidence is the newest retained tail, bounded to 500 whole
+entries and 1 MiB of UTF-8 entry data. The opaque environment ID is an
+identifier, not a credential; the private URL capability is what authorizes
+local API and terminal access.
 
 The optional settings are intentionally limited:
 

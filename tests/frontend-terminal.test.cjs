@@ -198,9 +198,13 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
       }
       if (url === "/api/environments" && requestOptions.method === "POST") {
         if (deferredCreate) return deferredCreate;
-        return response(options.createStatus ?? 200, options.createStatus === 401
+        const status = options.createStatus ?? 200;
+        const body = options.createBody ?? (status === 401
           ? { error: "unauthorized" }
-          : { id: "env-test" });
+          : status >= 400
+            ? { error: "environment capacity reached" }
+            : { id: "env-test" });
+        return response(status, body);
       }
       if (requestOptions.method === "DELETE" && deferredDestroy) return deferredDestroy;
       return response(200, emptySnapshot);
@@ -292,12 +296,12 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
   vm.runInNewContext(appSource, context);
   if (options.create !== false) {
     await element("#create").dispatch("click");
-    if (options.createStatus !== 401 && options.openSocket !== false) {
+    if ((options.createStatus ?? 200) < 400 && options.openSocket !== false) {
       assert.equal(sockets.length, 1);
       sockets[0].open();
     }
   }
-  if (options.create !== false && options.createStatus !== 401
+  if (options.create !== false && (options.createStatus ?? 200) < 400
     && options.openSocket !== false && options.autoReady !== false
     && sockets[0].readyState === MockWebSocket.OPEN) {
     sockets[0].message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: true }));
@@ -541,6 +545,20 @@ test("a 401 clears tab access and leaves every operation safely disabled", async
   assert.equal(terminal.announcement.textContent, "Open the private URL printed by Clannon.");
   assert.match(terminal.output.textContent, /Open the private URL printed by Clannon\./);
   assert.doesNotMatch(terminal.output.textContent, new RegExp(ACCESS_TOKEN));
+});
+
+test("shows environment capacity conflicts without opening a terminal", async () => {
+  const terminal = await openTerminal(null, false, null, {
+    createStatus: 409,
+    createBody: { error: "at most 4 environments may exist at once" },
+  });
+
+  assert.equal(terminal.sockets.length, 0);
+  assert.equal(terminal.stateLabel.textContent, "No environment");
+  assert.equal(terminal.create.disabled, false);
+  assert.equal(terminal.destroy.disabled, true);
+  assert.match(terminal.output.textContent, /at most 4 environments may exist at once/);
+  assert.match(terminal.announcement.textContent, /at most 4 environments may exist at once/);
 });
 
 test("locks a stale tab when its terminal upgrade and authenticated access probe are rejected", async () => {

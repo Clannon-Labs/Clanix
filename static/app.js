@@ -248,8 +248,9 @@ async function createEnvironment() {
       lockForAccess();
       return;
     }
-    showTerminalError(error);
     resetEnvironment();
+    showTerminalError(error);
+    announceTerminal(`Environment creation failed. ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     setBusy(false);
   }

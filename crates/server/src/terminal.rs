@@ -2,14 +2,16 @@ use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use futures_util::{SinkExt, StreamExt, stream::SplitSink, stream::SplitStream};
-use runtime::{TerminalEvent, TerminalInput, TerminalReservation};
+use runtime::{TerminalDimensions, TerminalEvent, TerminalInput, TerminalReservation};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const SUBPROTOCOL: &str = "clannon.terminal.v1";
 const VERSION: u8 = 1;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_WEBSOCKET_MESSAGE_BYTES: usize = MAX_INPUT_BYTES * 6 + 1024;
-const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
+// Runtime PTY setup owns a four-second handshake plus bounded helper cleanup.
+// Keep this outer protocol deadline longer so cancellation cannot cut cleanup short.
+const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 const FINAL_EVENT_TIMEOUT: Duration = Duration::from_secs(2);
 const CLOSE_NORMAL: u16 = 1000;
 const CLOSE_PROTOCOL: u16 = 1002;
@@ -29,6 +31,8 @@ enum ClientControl {
     },
     #[serde(rename = "input")]
     Input { data: String },
+    #[serde(rename = "resize")]
+    Resize { columns: u16, rows: u16 },
 }
 
 #[derive(Debug, PartialEq)]
@@ -40,6 +44,7 @@ struct OpenRequest {
 #[derive(Debug, PartialEq)]
 enum InputAction {
     Send(TerminalInputData),
+    Resize { columns: u16, rows: u16 },
     Ignore,
     Close,
 }
@@ -101,28 +106,44 @@ pub(crate) async fn session(socket: WebSocket, reservation: TerminalReservation)
             return;
         }
     };
-    // V1 validates dimensions but does not resize until the runtime exposes a PTY.
-    let _dimensions = (open.columns, open.rows);
-
-    let mut attachment = match reservation.open() {
-        Ok(attachment) => attachment,
-        Err(error) => {
-            finish_with_error(
-                &mut sender,
-                "runtime_error",
-                &format!("could not open terminal: {error}"),
-                CloseKind::Runtime,
-            )
-            .await;
+    let initial_dimensions = match terminal_dimensions(open.columns, open.rows) {
+        Ok(dimensions) => dimensions,
+        Err(message) => {
+            finish_with_error(&mut sender, "protocol_error", &message, CloseKind::Protocol).await;
             return;
         }
     };
+
+    let mut attachment =
+        match tokio::time::timeout(OPEN_TIMEOUT, reservation.open(initial_dimensions)).await {
+            Ok(Ok(attachment)) => attachment,
+            Ok(Err(error)) => {
+                finish_with_error(
+                    &mut sender,
+                    "runtime_error",
+                    &format!("could not open terminal: {error}"),
+                    CloseKind::Runtime,
+                )
+                .await;
+                return;
+            }
+            Err(_) => {
+                finish_with_error(
+                    &mut sender,
+                    "runtime_error",
+                    "timed out opening terminal",
+                    CloseKind::Runtime,
+                )
+                .await;
+                return;
+            }
+        };
     if send_control(
         &mut sender,
         &ServerControl::Ready {
             version: VERSION,
             resumed: attachment.resumed(),
-            resize: false,
+            resize: true,
         },
     )
     .await
@@ -144,6 +165,29 @@ pub(crate) async fn session(socket: WebSocket, reservation: TerminalReservation)
                             };
                             if let Err(error) = attachment.send(input).await {
                                 finish_after_write_error(&mut sender, &mut attachment, &error.to_string()).await;
+                                break;
+                            }
+                        }
+                        Ok(InputAction::Resize { columns, rows }) => {
+                            let dimensions = match terminal_dimensions(columns, rows) {
+                                Ok(dimensions) => dimensions,
+                                Err(message) => {
+                                    finish_with_error(
+                                        &mut sender,
+                                        "protocol_error",
+                                        &message,
+                                        CloseKind::Protocol,
+                                    ).await;
+                                    break;
+                                }
+                            };
+                            if let Err(error) = attachment.resize(dimensions).await {
+                                finish_with_error(
+                                    &mut sender,
+                                    "runtime_error",
+                                    &format!("could not resize terminal: {error}"),
+                                    CloseKind::Runtime,
+                                ).await;
                                 break;
                             }
                         }
@@ -291,9 +335,7 @@ fn parse_open(text: &str) -> Result<OpenRequest, String> {
     if version != VERSION {
         return Err(format!("unsupported terminal protocol version {version}"));
     }
-    if !(1..=1000).contains(&columns) || !(1..=1000).contains(&rows) {
-        return Err("terminal columns and rows must each be between 1 and 1000".to_owned());
-    }
+    validate_dimensions(columns, rows)?;
     Ok(OpenRequest { columns, rows })
 }
 
@@ -301,11 +343,19 @@ fn parse_input(message: Message) -> Result<InputAction, String> {
     match message {
         Message::Text(text) => {
             let control = parse_control(&text)?;
-            let ClientControl::Input { data } = control else {
-                return Err("only input controls are valid after terminal ready".to_owned());
-            };
-            ensure_input_bound(data.len())?;
-            Ok(InputAction::Send(TerminalInputData::Text(data)))
+            match control {
+                ClientControl::Input { data } => {
+                    ensure_input_bound(data.len())?;
+                    Ok(InputAction::Send(TerminalInputData::Text(data)))
+                }
+                ClientControl::Resize { columns, rows } => {
+                    validate_dimensions(columns, rows)?;
+                    Ok(InputAction::Resize { columns, rows })
+                }
+                ClientControl::Open { .. } => {
+                    Err("only input or resize controls are valid after terminal ready".to_owned())
+                }
+            }
         }
         Message::Binary(bytes) => {
             ensure_input_bound(bytes.len())?;
@@ -328,6 +378,20 @@ fn ensure_input_bound(length: usize) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+fn validate_dimensions(columns: u16, rows: u16) -> Result<(), String> {
+    if !(1..=1000).contains(&columns) || !(1..=1000).contains(&rows) {
+        Err("terminal columns and rows must each be between 1 and 1000".to_owned())
+    } else {
+        Ok(())
+    }
+}
+
+fn terminal_dimensions(columns: u16, rows: u16) -> Result<TerminalDimensions, String> {
+    validate_dimensions(columns, rows)?;
+    TerminalDimensions::new(columns, rows)
+        .map_err(|_| "terminal columns and rows must each be between 1 and 1000".to_owned())
 }
 
 async fn finish_with_error(
@@ -432,26 +496,58 @@ mod tests {
     }
 
     #[test]
+    fn parses_exact_bounded_resize_only_after_ready() {
+        assert_eq!(
+            parse_input(Message::Text(
+                r#"{"type":"resize","columns":120,"rows":36}"#.into()
+            )),
+            Ok(InputAction::Resize {
+                columns: 120,
+                rows: 36,
+            })
+        );
+        assert!(
+            parse_open(r#"{"type":"resize","columns":120,"rows":36}"#).is_err(),
+            "resize must not be accepted before ready"
+        );
+
+        for invalid in [
+            r#"{"type":"open","version":1,"columns":80,"rows":24}"#,
+            r#"{"type":"resize","columns":0,"rows":36}"#,
+            r#"{"type":"resize","columns":120,"rows":1001}"#,
+            r#"{"type":"resize","columns":120}"#,
+            r#"{"type":"resize","columns":"120","rows":36}"#,
+            r#"{"type":"resize","columns":120,"rows":36,"extra":true}"#,
+            r#"{"type":"unknown","columns":120,"rows":36}"#,
+        ] {
+            assert!(
+                parse_input(Message::Text(invalid.into())).is_err(),
+                "accepted {invalid}"
+            );
+        }
+    }
+
+    #[test]
     fn serializes_ready_with_resumed_and_resize_contract() {
         let fresh = serde_json::to_value(ServerControl::Ready {
             version: VERSION,
             resumed: false,
-            resize: false,
+            resize: true,
         })
         .unwrap();
         let resumed = serde_json::to_value(ServerControl::Ready {
             version: VERSION,
             resumed: true,
-            resize: false,
+            resize: true,
         })
         .unwrap();
         assert_eq!(
             fresh,
-            serde_json::json!({"type":"ready","version":1,"resumed":false,"resize":false})
+            serde_json::json!({"type":"ready","version":1,"resumed":false,"resize":true})
         );
         assert_eq!(
             resumed,
-            serde_json::json!({"type":"ready","version":1,"resumed":true,"resize":false})
+            serde_json::json!({"type":"ready","version":1,"resumed":true,"resize":true})
         );
     }
 

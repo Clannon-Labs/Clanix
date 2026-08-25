@@ -8,5 +8,6 @@ pub use environment::Runtime;
 pub use error::{RuntimeError, RuntimeErrorKind};
 pub use observation::ObservationSnapshot;
 pub use terminal::{
-    TerminalAttachment, TerminalEvent, TerminalInput, TerminalOpenError, TerminalReservation,
+    InvalidTerminalDimensions, TerminalAttachment, TerminalDimensions, TerminalEvent,
+    TerminalInput, TerminalOpenError, TerminalReservation,
 };

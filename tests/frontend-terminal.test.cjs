@@ -15,6 +15,9 @@ function createElement(textContent = "") {
     disabled: false,
     hidden: false,
     innerHTML: "",
+    clientHeight: 0,
+    clientWidth: 0,
+    focusCount: 0,
     scrollHeight: 24,
     scrollTop: 0,
     selectionStart: 0,
@@ -30,7 +33,7 @@ function createElement(textContent = "") {
       const results = (listeners.get(type) ?? []).map((listener) => listener(event));
       await Promise.all(results);
     },
-    focus() {},
+    focus() { this.focusCount += 1; },
   };
 }
 
@@ -44,6 +47,8 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
   const form = element("#terminal-form");
   const command = element("#command");
   const output = element("#terminal-output", "Create an environment to open the shell.");
+  output.clientWidth = options.outputWidth ?? 816;
+  output.clientHeight = options.outputHeight ?? 416;
   const run = element("#terminal-form button[type='submit']");
   const storedValues = new Map();
   const sessionValues = new Map();
@@ -52,6 +57,10 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
   const historyCalls = [];
   const locationReplacements = [];
   const windowListeners = new Map();
+  const animationFrames = [];
+  const timers = new Map();
+  const resizeObservers = [];
+  let nextTimerId = 1;
   let resolveDeferredCreate;
   let resolveDeferredDestroy;
   const deferredCreate = options.deferCreate
@@ -128,6 +137,27 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
     }
   }
 
+  class MockResizeObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.disconnected = false;
+      this.observed = [];
+      resizeObservers.push(this);
+    }
+
+    observe(target) {
+      this.observed.push(target);
+    }
+
+    disconnect() {
+      this.disconnected = true;
+    }
+
+    trigger() {
+      this.callback([{ target: output }]);
+    }
+  }
+
   const emptySnapshot = snapshotOverride ?? {
     captured_at_ms: 0,
     files: [],
@@ -145,6 +175,18 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
   const context = {
     document: {
       documentElement: { dataset: {} },
+      createElement(tagName) {
+        assert.equal(tagName, "canvas");
+        return {
+          getContext(kind) {
+            assert.equal(kind, "2d");
+            return {
+              font: "",
+              measureText() { return { width: (options.cellWidth ?? 8) * 10 }; },
+            };
+          },
+        };
+      },
       querySelector(selector) {
         return selector === "#terminal-form button[type='submit']" ? run : element(selector);
       },
@@ -210,6 +252,7 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
     ArrayBuffer,
     TextDecoder: TrackingTextDecoder,
     TextEncoder,
+    ResizeObserver: MockResizeObserver,
     WebSocket: MockWebSocket,
     window: {
       addEventListener(type, listener) {
@@ -217,8 +260,32 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
         handlers.push(listener);
         windowListeners.set(type, handlers);
       },
-      requestAnimationFrame(callback) { callback(); },
-      setTimeout() {},
+      getComputedStyle() {
+        return {
+          font: "400 16px mock-mono",
+          fontFamily: "mock-mono",
+          fontSize: "16px",
+          fontWeight: "400",
+          lineHeight: `${options.lineHeight ?? 16}px`,
+          paddingBottom: `${options.paddingBottom ?? 16}px`,
+          paddingLeft: `${options.paddingLeft ?? 16}px`,
+          paddingRight: `${options.paddingRight ?? 16}px`,
+          paddingTop: `${options.paddingTop ?? 16}px`,
+        };
+      },
+      requestAnimationFrame(callback) {
+        animationFrames.push(callback);
+        return animationFrames.length;
+      },
+      clearTimeout(id) {
+        timers.delete(id);
+      },
+      setTimeout(callback) {
+        const id = nextTimerId;
+        nextTimerId += 1;
+        timers.set(id, callback);
+        return id;
+      },
     },
   };
 
@@ -233,7 +300,7 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
   if (options.create !== false && options.createStatus !== 401
     && options.openSocket !== false && options.autoReady !== false
     && sockets[0].readyState === MockWebSocket.OPEN) {
-    sockets[0].message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: false }));
+    sockets[0].message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: true }));
   }
   return {
     announcement: element("#terminal-announcement"),
@@ -247,12 +314,14 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
     fetches,
     form,
     historyCalls,
+    interrupt: element("#interrupt"),
     location: context.location,
     locationReplacements,
     output,
     prompt: element("#command-prompt"),
     reconnect: element("#reconnect"),
     refresh: element("#refresh"),
+    resizeObservers,
     run,
     resolveCreate(status, body = { error: "unauthorized" }) {
       resolveDeferredCreate?.(response(status, body));
@@ -268,6 +337,20 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
     sessionValues,
     transcript: element("#transcript"),
     transcriptCount: element("#transcript-count"),
+    flushAnimationFrames() {
+      while (animationFrames.length) animationFrames.shift()();
+    },
+    flushTimers() {
+      while (timers.size) {
+        const pending = [...timers.values()];
+        timers.clear();
+        for (const callback of pending) callback();
+      }
+    },
+    setOutputSize(width, height) {
+      output.clientWidth = width;
+      output.clientHeight = height;
+    },
     async dispatchWindow(type, event = {}) {
       const results = (windowListeners.get(type) ?? []).map((listener) => listener(event));
       await Promise.all(results);
@@ -276,7 +359,11 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
 }
 
 function sentInput(socket) {
-  return socket.sent.slice(1).map((value) => JSON.parse(value).data);
+  return sentControls(socket).filter((control) => control.type === "input").map((control) => control.data);
+}
+
+function sentControls(socket) {
+  return socket.sent.filter((value) => typeof value === "string").map((value) => JSON.parse(value));
 }
 
 function bytes(text) {
@@ -354,7 +441,7 @@ test("contains session-storage and history failures while preserving fragment ac
   assert.match(terminal.output.textContent, /Private URL remains in the address bar/);
   await terminal.create.dispatch("click");
   terminal.sockets[0].open();
-  terminal.sockets[0].message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: false }));
+  terminal.sockets[0].message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: true }));
   assert.equal(terminal.fetches[0].options.headers.Authorization, `Bearer ${ACCESS_TOKEN}`);
   assert.match(terminal.sockets[0].url, new RegExp(`access_token=${ACCESS_TOKEN}$`));
   assert.equal(terminal.status.textContent, "Ready");
@@ -476,7 +563,7 @@ test("locks a stale tab when its terminal upgrade and authenticated access probe
   assert.equal(terminal.create.disabled, true);
 });
 
-test("negotiates v1 and waits for ready before enabling Run", async () => {
+test("measures the PTY for open and waits for strict resize readiness", async () => {
   const terminal = await openTerminal(null, false, null, { autoReady: false });
 
   assert.equal(terminal.socket.requestedProtocols, "clannon.terminal.v1");
@@ -484,19 +571,100 @@ test("negotiates v1 and waits for ready before enabling Run", async () => {
   assert.deepEqual(JSON.parse(terminal.socket.sent[0]), {
     type: "open",
     version: 1,
-    columns: 80,
+    columns: 98,
     rows: 24,
   });
   assert.equal(terminal.status.textContent, "Connecting");
   assert.equal(terminal.command.disabled, false);
   assert.equal(terminal.run.disabled, true);
+  assert.equal(terminal.interrupt.disabled, true);
 
-  terminal.socket.message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: false }));
+  terminal.socket.message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: true }));
 
   assert.equal(terminal.status.textContent, "Ready");
   assert.equal(terminal.run.disabled, false);
+  assert.equal(terminal.interrupt.disabled, false);
   assert.equal(terminal.output.textContent, "Clannon environment ready.\n");
   assert.match(terminal.announcement.textContent, /fresh shell/i);
+  assert.equal(terminal.resizeObservers.length, 1);
+  assert.deepEqual(terminal.resizeObservers[0].observed, [terminal.output]);
+});
+
+test("clamps measured PTY dimensions to the protocol bounds", async () => {
+  const terminal = await openTerminal(null, false, null, {
+    autoReady: false,
+    cellWidth: 1,
+    lineHeight: 16,
+    outputHeight: 0,
+    outputWidth: 20_000,
+    paddingBottom: 0,
+    paddingLeft: 0,
+    paddingRight: 0,
+    paddingTop: 0,
+  });
+
+  assert.deepEqual(JSON.parse(terminal.socket.sent[0]), {
+    type: "open",
+    version: 1,
+    columns: 1000,
+    rows: 1,
+  });
+});
+
+test("trailing-debounces and deduplicates resize while rejecting stale observer work", async () => {
+  const terminal = await openTerminal();
+  const observer = terminal.resizeObservers[0];
+
+  terminal.setOutputSize(976, 496);
+  observer.trigger();
+  observer.trigger();
+  assert.equal(sentControls(terminal.socket).filter(({ type }) => type === "resize").length, 0);
+  terminal.setOutputSize(992, 496);
+  observer.trigger();
+  terminal.flushTimers();
+  assert.deepEqual(sentControls(terminal.socket).at(-1), {
+    type: "resize",
+    columns: 120,
+    rows: 29,
+  });
+
+  observer.trigger();
+  terminal.flushTimers();
+  assert.equal(sentControls(terminal.socket).filter(({ type }) => type === "resize").length, 1);
+
+  terminal.setOutputSize(1056, 496);
+  observer.trigger();
+  terminal.socket.close(1006, "network lost");
+  assert.equal(observer.disconnected, true);
+  terminal.flushTimers();
+  assert.equal(sentControls(terminal.socket).filter(({ type }) => type === "resize").length, 1);
+
+  await terminal.reconnect.dispatch("click");
+  const resumed = terminal.sockets[1];
+  resumed.open();
+  assert.deepEqual(JSON.parse(resumed.sent[0]), {
+    type: "open",
+    version: 1,
+    columns: 128,
+    rows: 29,
+  });
+
+  observer.trigger();
+  terminal.flushTimers();
+  assert.equal(sentControls(terminal.socket).filter(({ type }) => type === "resize").length, 1);
+  assert.equal(resumed.sent.length, 1);
+});
+
+test("drops a queued resize when destruction makes its connection stale", async () => {
+  const terminal = await openTerminal();
+  terminal.setOutputSize(900, 450);
+  terminal.resizeObservers[0].trigger();
+
+  await terminal.destroy.dispatch("click");
+  terminal.flushTimers();
+
+  assert.equal(sentControls(terminal.socket).filter(({ type }) => type === "resize").length, 0);
+  assert.equal(terminal.resizeObservers[0].disconnected, true);
 });
 
 test("enforces the 64 KiB UTF-8 input limit without losing the draft", async () => {
@@ -531,6 +699,35 @@ test("keeps draft and local evidence unchanged when input send throws", async ()
   assert.match(terminal.output.textContent, /send failed/);
 });
 
+test("sends exact binary ETX only while ready without changing the draft or copy shortcuts", async () => {
+  const terminal = await openTerminal(null, false, null, { autoReady: false });
+  terminal.command.value = "draft survives";
+  const outputBeforeReady = terminal.output.textContent;
+
+  await terminal.interrupt.dispatch("click");
+  assert.equal(terminal.socket.sent.length, 1);
+  assert.equal(terminal.command.value, "draft survives");
+  assert.equal(terminal.output.textContent, outputBeforeReady);
+
+  terminal.socket.message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: true }));
+  const readyOutput = terminal.output.textContent;
+  const focusBeforeInterrupt = terminal.command.focusCount;
+  await terminal.interrupt.dispatch("click");
+
+  assert.deepEqual(Array.from(terminal.socket.sent.at(-1)), [0x03]);
+  assert.equal(terminal.command.value, "draft survives");
+  assert.equal(terminal.output.textContent, readyOutput);
+  assert.equal(terminal.announcement.textContent, "Ctrl-C sent.");
+  assert.equal(terminal.command.focusCount, focusBeforeInterrupt + 1);
+
+  const copy = { key: "c", ctrlKey: true, prevented: false, preventDefault() { this.prevented = true; } };
+  await terminal.command.dispatch("keydown", copy);
+  assert.equal(copy.prevented, false);
+
+  terminal.socket.close(1006, "network lost");
+  assert.equal(terminal.interrupt.disabled, true);
+});
+
 test("streams split UTF-8 and flushes its socket decoder exactly once", async () => {
   const terminal = await openTerminal();
   const encoded = new TextEncoder().encode("€ tail");
@@ -546,6 +743,45 @@ test("streams split UTF-8 and flushes its socket decoder exactly once", async ()
   assert.equal(terminal.decoders[0].flushes, 1);
   terminal.socket.close(1000, "terminal exited");
   assert.equal(terminal.decoders[0].flushes, 1);
+});
+
+test("projects fragmented CR, CSI, OSC, ESC, UTF-8, and controls as safe plain text", async () => {
+  const terminal = await openTerminal();
+  const euro = new TextEncoder().encode("€");
+
+  terminal.socket.message(euro.slice(0, 2).buffer);
+  terminal.socket.message(euro.slice(2).buffer);
+  terminal.socket.message(bytes(" alpha\r"));
+  terminal.socket.message(bytes("\nbeta\rgamma\u001b[3"));
+  terminal.socket.message(bytes("1mred\u001b[0m\u001b]0;ti"));
+  terminal.socket.message(bytes("tle\u001b"));
+  terminal.socket.message(bytes("\\done\u001b7\u0001tail\r"));
+  terminal.socket.message(JSON.stringify({ type: "exit", code: 0 }));
+
+  assert.match(terminal.output.textContent, /€ alpha\nbeta\ngamma\n\[terminal control sequences omitted/);
+  assert.match(terminal.output.textContent, /\nreddone␁tail\n/);
+  assert.match(terminal.output.textContent, /done␁tail\n/);
+  assert.doesNotMatch(terminal.output.textContent, /\u001b|\[31m|\[0m|title/);
+  assert.equal((terminal.output.textContent.match(/terminal control sequences omitted/g) ?? []).length, 1);
+  assert.equal(terminal.decoders[0].flushes, 1);
+});
+
+test("renders bidi formatting controls visibly in live output and transcript evidence", async () => {
+  const terminal = await openTerminal(null, false, {
+    captured_at_ms: 1_700_000_001_000,
+    files: [],
+    network: [],
+    processes: [],
+    transcript: [{ timestamp_ms: 1_700_000_000_000, direction: "output", data: "safe\u2066spoof\u2069" }],
+    warnings: [],
+  });
+
+  terminal.socket.message(bytes("safe\u202Espoof\u202C"));
+
+  assert.match(terminal.output.textContent, /safe\[U\+202E\]spoof\[U\+202C\]/);
+  assert.doesNotMatch(terminal.output.textContent, /\u202e|\u202c/);
+  assert.match(terminal.transcript.innerHTML, /safe\[U\+2066\]spoof\[U\+2069\]/);
+  assert.doesNotMatch(terminal.transcript.innerHTML, /\u2066|\u2069/);
 });
 
 test("flushes the socket decoder once when the environment is destroyed", async () => {
@@ -565,7 +801,8 @@ test("treats text output, Blob output, malformed controls, and wrong versions as
     (terminal) => terminal.socket.message("plain terminal output"),
     (terminal) => terminal.socket.message(new Blob(["binary blob"])),
     (terminal) => terminal.socket.message("{"),
-    (terminal) => terminal.socket.message(JSON.stringify({ type: "ready", version: 2, resumed: false, resize: false })),
+    (terminal) => terminal.socket.message(JSON.stringify({ type: "ready", version: 2, resumed: false, resize: true })),
+    (terminal) => terminal.socket.message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: false })),
     (terminal) => {
       terminal.socket.message(JSON.stringify({
         type: "error",
@@ -607,7 +844,7 @@ test("keeps output gaps in a recoverable terminal-error state after close", asyn
   assert.match(terminal.announcement.textContent, /Reconnect to continue.*Transcript may contain/i);
 });
 
-test("renders a structured runtime failure as an ended shell", async () => {
+test("keeps a generic runtime failure recoverable without claiming the shell ended", async () => {
   const terminal = await openTerminal();
 
   terminal.socket.message(JSON.stringify({
@@ -617,9 +854,11 @@ test("renders a structured runtime failure as an ended shell", async () => {
   }));
   terminal.socket.close(1011, "terminal proxy stopped");
 
-  assert.equal(terminal.status.textContent, "Ended");
+  assert.equal(terminal.status.textContent, "Terminal error");
   assert.match(terminal.output.textContent, /runtime_error: terminal proxy stopped/);
-  assert.equal(terminal.reconnect.textContent, "Open new shell");
+  assert.equal(terminal.reconnect.hidden, false);
+  assert.equal(terminal.reconnect.textContent, "Reconnect");
+  assert.match(terminal.announcement.textContent, /existing shell may still be available/i);
 });
 
 test("preserves draft and output across disconnect then resumes and refreshes Transcript", async () => {
@@ -645,7 +884,7 @@ test("preserves draft and output across disconnect then resumes and refreshes Tr
   assert.equal(terminal.status.textContent, "Reconnecting");
   assert.equal(terminal.run.disabled, true);
   assert.equal(resumed.sent.length, 1, "reconnect only sends the open control");
-  resumed.message(JSON.stringify({ type: "ready", version: 1, resumed: true, resize: false }));
+  resumed.message(JSON.stringify({ type: "ready", version: 1, resumed: true, resize: true }));
 
   assert.equal(terminal.command.value, "draft command");
   assert.match(terminal.output.textContent, /shell preserved/i);
@@ -668,13 +907,13 @@ test("labels shell exit and explicitly opens a fresh shell", async () => {
   await terminal.reconnect.dispatch("click");
   const fresh = terminal.sockets[1];
   fresh.open();
-  fresh.message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: false }));
+  fresh.message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: true }));
 
   assert.match(terminal.output.textContent, /fresh shell opened after the previous shell ended/i);
   assert.equal(terminal.status.textContent, "Ready");
 });
 
-test("renders a prompt for every submitted command", async () => {
+test("relies on authoritative PTY echo instead of fabricating submitted commands", async () => {
   const terminal = await openTerminal();
 
   for (const command of ["echo one", "echo two"]) {
@@ -686,7 +925,10 @@ test("renders a prompt for every submitted command", async () => {
   }
 
   assert.deepEqual(sentInput(terminal.socket), ["echo one\n", "echo two\n"]);
-  assert.equal(terminal.output.textContent, "Clannon environment ready.\n$ echo one\n$ echo two\n");
+  assert.equal(terminal.output.textContent, "Clannon environment ready.\n");
+  terminal.socket.message(bytes("/workspace # echo one\r\none\r\n/workspace # echo two\r\ntwo\r\n"));
+  assert.equal((terminal.output.textContent.match(/echo one/g) ?? []).length, 1);
+  assert.equal((terminal.output.textContent.match(/echo two/g) ?? []).length, 1);
 });
 
 test("waits for and renders a backslash continuation", async () => {
@@ -711,7 +953,10 @@ test("waits for and renders a backslash continuation", async () => {
 
   assert.equal(submit.prevented, true);
   assert.deepEqual(sentInput(terminal.socket), ["echo hey \\\necho something\n"]);
-  assert.equal(terminal.output.textContent, "Clannon environment ready.\n$ echo hey \\\n> echo something\n");
+  assert.equal(terminal.output.textContent, "Clannon environment ready.\n");
+  terminal.socket.message(bytes("echo hey \\\r\n> echo something\r\n"));
+  assert.equal((terminal.output.textContent.match(/echo hey/g) ?? []).length, 1);
+  assert.equal((terminal.output.textContent.match(/echo something/g) ?? []).length, 1);
   assert.equal(terminal.command.value, "");
   assert.equal(terminal.prompt.textContent, "$");
 });
@@ -747,7 +992,7 @@ test("renders Shift+Enter command lines as independent prompts", async () => {
   await terminal.command.dispatch("keydown", enterEvent());
 
   assert.deepEqual(sentInput(terminal.socket), ["echo one\necho two\n"]);
-  assert.equal(terminal.output.textContent, "Clannon environment ready.\n$ echo one\n$ echo two\n");
+  assert.equal(terminal.output.textContent, "Clannon environment ready.\n");
 });
 
 test("applies and persists validated color themes", async () => {
@@ -799,6 +1044,8 @@ test("keeps the system and native theme-control contracts", () => {
   for (const theme of ["system", "light", "dark"]) {
     assert.match(html, new RegExp(`<option value="${theme}">`, "i"));
   }
+  assert.match(html, /<button id="interrupt"[^>]*aria-label="Send Ctrl-C to the running shell"[^>]*disabled>Ctrl-C<\/button>/);
+  assert.match(html, /Live \/ PTY · plain text/);
   assert.match(styles, /@media \(prefers-color-scheme: dark\) {[\s\S]*:root:not\(\[data-theme\]\)/);
 });
 
@@ -806,7 +1053,7 @@ test("renders timestamped transcript evidence without trusting its HTML", async 
   const transcript = Array.from({ length: 102 }, (_, index) => ({
     timestamp_ms: 1_700_000_000_000 + index,
     direction: index === 101 ? "input" : "output",
-    data: index === 101 ? "printf '<script>&\\n'\n" : `output ${index}\n`,
+    data: index === 101 ? "printf '<script>&\\n'\n\u0003\u001b" : `output ${index}\n`,
   }));
   const terminal = await openTerminal(null, false, {
     captured_at_ms: 1_700_000_001_000,
@@ -821,9 +1068,10 @@ test("renders timestamped transcript evidence without trusting its HTML", async 
   assert.match(terminal.transcript.innerHTML, /Showing the newest 100 of 102 events/);
   assert.equal((terminal.transcript.innerHTML.match(/class="evidence-row transcript-row"/g) ?? []).length, 100);
   assert.match(terminal.transcript.innerHTML, /<time datetime="2023-/);
-  assert.match(terminal.transcript.innerHTML, /Command<\/span>/);
+  assert.match(terminal.transcript.innerHTML, /Input<\/span>/);
   assert.match(terminal.transcript.innerHTML, /&lt;script&gt;&amp;\\n/);
-  assert.ok(terminal.transcript.innerHTML.includes("printf &#039;&lt;script&gt;&amp;\\n&#039;\n</code>"));
+  assert.ok(terminal.transcript.innerHTML.includes("printf &#039;&lt;script&gt;&amp;\\n&#039;\n␃␛</code>"));
+  assert.match(terminal.transcript.innerHTML, /␃␛/);
   assert.doesNotMatch(terminal.transcript.innerHTML, /<script>/);
 });
 
@@ -836,4 +1084,18 @@ test("bounds live terminal output while preserving its newest tail", async () =>
   assert.match(terminal.output.textContent, /newest-tail-still-visible$/);
   assert.equal((terminal.output.textContent.match(/earlier terminal output omitted/g) ?? []).length, 1);
   assert.ok(terminal.output.textContent.length < 201 * 1024);
+});
+
+test("follows live output only while the user is already at the bottom", async () => {
+  const terminal = await openTerminal();
+  terminal.output.clientHeight = 400;
+  terminal.output.scrollHeight = 1_000;
+  terminal.output.scrollTop = 200;
+
+  terminal.socket.message(bytes("while inspecting history"));
+  assert.equal(terminal.output.scrollTop, 200);
+
+  terminal.output.scrollTop = 600;
+  terminal.socket.message(bytes("follow newest output"));
+  assert.equal(terminal.output.scrollTop, 1_000);
 });

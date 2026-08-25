@@ -7,6 +7,7 @@ const elements = {
   command: document.querySelector("#command"),
   run: document.querySelector("#terminal-form button[type='submit']"),
   reconnect: document.querySelector("#reconnect"),
+  interrupt: document.querySelector("#interrupt"),
   output: document.querySelector("#terminal-output"),
   commandPrompt: document.querySelector("#command-prompt"),
   environmentId: document.querySelector("#environment-id"),
@@ -23,6 +24,10 @@ const TERMINAL_OMISSION_MARKER = "[earlier terminal output omitted]\n";
 const TERMINAL_PROTOCOL = "clannon.terminal.v1";
 const TERMINAL_VERSION = 1;
 const MAX_TERMINAL_INPUT_BYTES = 64 * 1024;
+const MIN_TERMINAL_DIMENSION = 1;
+const MAX_TERMINAL_DIMENSION = 1000;
+const TERMINAL_RESIZE_DEBOUNCE_MS = 120;
+const SCREEN_OUTPUT_NOTICE = "[terminal control sequences omitted — plain-text view]\n";
 const PROTOCOL_ERROR_RECOVERY = "Destroy this environment before reloading the page.";
 const ACCESS_TOKEN_STORAGE_KEY = "clannon-access-token";
 const ACCESS_INSTRUCTION = "Open the private URL printed by Clannon.";
@@ -36,6 +41,7 @@ let accessFragmentCleanupFailed = false;
 let accessToken = bootstrapAccessToken();
 let accessGeneration = 0;
 let accessCandidateGeneration = 0;
+let screenOutputNoticeShown = false;
 
 setThemePreference(readThemePreference());
 elements.create.addEventListener("click", createEnvironment);
@@ -46,6 +52,7 @@ elements.form.addEventListener("submit", runCommand);
 elements.command.addEventListener("keydown", handleCommandKeydown);
 elements.command.addEventListener("input", updateCommandComposer);
 elements.reconnect.addEventListener("click", handleReconnect);
+elements.interrupt.addEventListener("click", sendInterrupt);
 window.addEventListener("beforeunload", () => socket?.close());
 window.addEventListener("hashchange", handleAccessFragment);
 updateEnvironmentControls();
@@ -184,6 +191,7 @@ function lockForAccess() {
   elements.refresh.disabled = true;
   elements.command.disabled = true;
   elements.run.disabled = true;
+  elements.interrupt.disabled = true;
   elements.reconnect.hidden = true;
   elements.reconnect.disabled = true;
   elements.stateDot.classList.remove("running");
@@ -264,7 +272,11 @@ function connectTerminal(clearOutput) {
   terminalSocket.binaryType = "arraybuffer";
   socket = terminalSocket;
   const decoder = new TextDecoder();
+  const projector = createPlainTextPtyProjector();
   let decoderFlushed = false;
+  let resizeObserver = null;
+  let resizeTimer = null;
+  let lastDimensions = null;
   const reconnecting = !clearOutput;
   setTerminalState(
     reconnecting ? "reconnecting" : "connecting",
@@ -275,7 +287,50 @@ function connectTerminal(clearOutput) {
     if (decoderFlushed) return;
     decoderFlushed = true;
     const tail = decoder.decode();
-    if (tail && appendTail) appendOutput(tail);
+    if (appendTail) {
+      displayProjection(projector.write(tail));
+      displayProjection(projector.flush());
+    } else {
+      projector.discard();
+    }
+  };
+
+  const stopResizeObserver = () => {
+    const observer = resizeObserver;
+    resizeObserver = null;
+    if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+    resizeTimer = null;
+    observer?.disconnect();
+  };
+
+  const sendMeasuredResize = () => {
+    if (!resizeObserver || !isCurrentSocket(terminalSocket, id)
+      || terminalState !== "ready" || terminalSocket.readyState !== WebSocket.OPEN) return;
+    const dimensions = measureTerminalDimensions();
+    if (sameDimensions(dimensions, lastDimensions)) return;
+    try {
+      terminalSocket.send(JSON.stringify({ type: "resize", ...dimensions }));
+      lastDimensions = dimensions;
+    } catch (error) {
+      showTerminalError(error);
+      announceTerminal("The terminal size could not be updated. Reconnect to continue.");
+      terminalSocket.close();
+    }
+  };
+
+  const startResizeObserver = () => {
+    if (resizeObserver || typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(() => {
+      if (resizeObserver !== observer || !isCurrentSocket(terminalSocket, id)) return;
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = null;
+        if (resizeObserver !== observer) return;
+        sendMeasuredResize();
+      }, TERMINAL_RESIZE_DEBOUNCE_MS);
+    });
+    resizeObserver = observer;
+    observer.observe(elements.output);
   };
 
   const protocolError = (message) => {
@@ -293,11 +348,11 @@ function connectTerminal(clearOutput) {
       return;
     }
     try {
+      lastDimensions = measureTerminalDimensions();
       terminalSocket.send(JSON.stringify({
         type: "open",
         version: TERMINAL_VERSION,
-        columns: 80,
-        rows: 24,
+        ...lastDimensions,
       }));
     } catch (error) {
       showTerminalError(error);
@@ -312,6 +367,8 @@ function connectTerminal(clearOutput) {
         flushDecoder,
         openingAfterEnd,
         protocolError,
+        startResizeObserver,
+        stopResizeObserver,
       });
       return;
     }
@@ -325,12 +382,13 @@ function connectTerminal(clearOutput) {
     }
     try {
       const text = decoder.decode(event.data, { stream: true });
-      if (text) appendOutput(text);
+      displayProjection(projector.write(text));
     } catch {
       protocolError("server output could not be decoded.");
     }
   });
   terminalSocket.addEventListener("close", () => {
+    stopResizeObserver();
     const current = isCurrentSocket(terminalSocket, id);
     flushDecoder(current);
     if (!current) return;
@@ -378,12 +436,13 @@ function handleTerminalControl(text, connection) {
       || !hasExactKeys(control, ["type", "version", "resumed", "resize"])
       || control.version !== TERMINAL_VERSION
       || typeof control.resumed !== "boolean"
-      || control.resize !== false) {
+      || control.resize !== true) {
       connection.protocolError("received a malformed or out-of-sequence ready control.");
       return;
     }
     if (connection.clearOutput) {
       elements.output.textContent = "Clannon environment ready.\n";
+      screenOutputNoticeShown = false;
     } else if (control.resumed) {
       appendOutput("\n[shell preserved — recent output produced while detached may be in Transcript]\n");
       void refreshObservations();
@@ -396,6 +455,7 @@ function handleTerminalControl(text, connection) {
       ? "Terminal ready. The existing shell was preserved. Recent output produced while detached may be available in Transcript."
       : "Terminal ready with a fresh shell.";
     setTerminalState("ready", announcement);
+    connection.startResizeObserver();
     elements.command.focus();
     return;
   }
@@ -408,6 +468,7 @@ function handleTerminalControl(text, connection) {
       return;
     }
     connection.flushDecoder();
+    connection.stopResizeObserver();
     const code = control.code === null ? "unknown" : control.code;
     appendOutput(`\n[shell exited with code ${code}]\n`);
     setTerminalState("ended", `Shell exited with code ${code}. Open a new shell to continue in this environment.`);
@@ -422,6 +483,7 @@ function handleTerminalControl(text, connection) {
       return;
     }
     connection.flushDecoder();
+    connection.stopResizeObserver();
     const recovery = control.code === "protocol_error" ? ` ${PROTOCOL_ERROR_RECOVERY}` : "";
     showTerminalError(`${control.code}: ${control.message}${recovery}`);
     if (control.code === "protocol_error") {
@@ -429,7 +491,7 @@ function handleTerminalControl(text, connection) {
     } else if (control.code === "output_gap") {
       setTerminalState("terminal-error", `Some live terminal output was missed. ${control.message} Reconnect to continue; Transcript may contain the missed output.`);
     } else {
-      setTerminalState("ended", `The shell stopped because of a runtime error. ${control.message} Open a new shell to continue.`);
+      setTerminalState("terminal-error", `The terminal reported a runtime error. ${control.message} Reconnect to continue; the existing shell may still be available.`);
     }
     return;
   }
@@ -478,7 +540,6 @@ function runCommand(event) {
     announceTerminal("The command was not sent. Your draft was preserved so you can try again.");
     return;
   }
-  appendSubmittedCommand(command);
   elements.command.value = "";
   updateCommandComposer();
   window.setTimeout(refreshObservations, 350);
@@ -507,17 +568,6 @@ function updateCommandComposer() {
     && lineEndsWithContinuation(previousLine, previousLine.length) ? ">" : "$";
   elements.command.style.height = "auto";
   elements.command.style.height = `${Math.min(elements.command.scrollHeight, 128)}px`;
-}
-
-function appendSubmittedCommand(command) {
-  const leadingNewline = elements.output.textContent && !elements.output.textContent.endsWith("\n") ? "\n" : "";
-  let continuing = false;
-  const rendered = command.split("\n").map((line, index) => {
-    const prompt = index > 0 && continuing ? ">" : "$";
-    continuing = lineEndsWithContinuation(line, line.length);
-    return `${prompt} ${line}`;
-  }).join("\n");
-  appendOutput(`${leadingNewline}${rendered}\n`);
 }
 
 async function refreshObservations() {
@@ -566,10 +616,10 @@ function renderTranscript(transcript) {
         fractionalSecondDigits: 3,
       });
     const datetime = Number.isNaN(recordedAt.getTime()) ? "" : recordedAt.toISOString();
-    const data = entry.data === "" ? "∅" : String(entry.data);
+    const data = entry.data === "" ? "∅" : makeControlsVisible(String(entry.data));
     return `
       <div class="evidence-row transcript-row" data-direction="${input ? "input" : "output"}">
-        <span><time datetime="${datetime}" title="${datetime}">${escapeHtml(timestamp)}</time> · ${input ? "Command" : "Output"}</span>
+        <span><time datetime="${datetime}" title="${datetime}">${escapeHtml(timestamp)}</time> · ${input ? "Input" : "Output"}</span>
         <code>${escapeHtml(data)}</code>
       </div>`;
   }).join("");
@@ -643,6 +693,7 @@ function resetEnvironment() {
   environmentId = null;
   socket = null;
   destroying = false;
+  screenOutputNoticeShown = false;
   elements.command.value = "";
   updateCommandComposer();
   elements.environmentId.textContent = "waiting for environment";
@@ -677,6 +728,7 @@ function updateTerminalControls() {
   const ready = hasEnvironment && terminalState === "ready" && socket?.readyState === WebSocket.OPEN;
   elements.command.disabled = !hasEnvironment;
   elements.run.disabled = !ready;
+  elements.interrupt.disabled = !ready;
   const canReconnect = hasEnvironment
     && !socket
     && ["disconnected", "ended", "terminal-error"].includes(terminalState);
@@ -714,6 +766,8 @@ function setBusy(busy, label = "") {
 }
 
 function appendOutput(text) {
+  const previousScrollTop = elements.output.scrollTop;
+  const wasAtBottom = elements.output.scrollHeight - previousScrollTop - elements.output.clientHeight <= 2;
   const alreadyOmitted = elements.output.textContent.startsWith(TERMINAL_OMISSION_MARKER);
   const current = alreadyOmitted
     ? elements.output.textContent.slice(TERMINAL_OMISSION_MARKER.length)
@@ -729,7 +783,193 @@ function appendOutput(text) {
     }
   }
   elements.output.textContent = `${omitted ? TERMINAL_OMISSION_MARKER : ""}${next}`;
-  elements.output.scrollTop = elements.output.scrollHeight;
+  elements.output.scrollTop = wasAtBottom ? elements.output.scrollHeight : previousScrollTop;
+}
+
+function sendInterrupt() {
+  if (terminalState !== "ready" || socket?.readyState !== WebSocket.OPEN) {
+    updateTerminalControls();
+    return;
+  }
+  try {
+    socket.send(Uint8Array.of(0x03));
+    announceTerminal("Ctrl-C sent.");
+  } catch (error) {
+    showTerminalError(error);
+    announceTerminal("Ctrl-C was not sent. Your draft was preserved.");
+  } finally {
+    elements.command.focus();
+  }
+}
+
+function measureTerminalDimensions() {
+  const style = window.getComputedStyle(elements.output);
+  const horizontalPadding = numericPixels(style.paddingLeft) + numericPixels(style.paddingRight);
+  const verticalPadding = numericPixels(style.paddingTop) + numericPixels(style.paddingBottom);
+  const contentWidth = Math.max(0, elements.output.clientWidth - horizontalPadding);
+  const contentHeight = Math.max(0, elements.output.clientHeight - verticalPadding);
+  const fontSize = numericPixels(style.fontSize) || 16;
+  const lineHeight = numericPixels(style.lineHeight) || fontSize * 1.2;
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (context) context.font = style.font || `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  const measuredWidth = context?.measureText("0000000000").width / 10;
+  const cellWidth = Number.isFinite(measuredWidth) && measuredWidth > 0 ? measuredWidth : fontSize * 0.6;
+  return {
+    columns: clampTerminalDimension(Math.floor(contentWidth / cellWidth)),
+    rows: clampTerminalDimension(Math.floor(contentHeight / lineHeight)),
+  };
+}
+
+function numericPixels(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function clampTerminalDimension(value) {
+  return Math.min(MAX_TERMINAL_DIMENSION, Math.max(MIN_TERMINAL_DIMENSION, value));
+}
+
+function sameDimensions(left, right) {
+  return Boolean(left && right && left.columns === right.columns && left.rows === right.rows);
+}
+
+function displayProjection(projection) {
+  if (projection.text) appendOutput(projection.text);
+  if (projection.screenOriented && !screenOutputNoticeShown) {
+    const leadingNewline = elements.output.textContent && !elements.output.textContent.endsWith("\n") ? "\n" : "";
+    appendOutput(`${leadingNewline}${SCREEN_OUTPUT_NOTICE}`);
+    screenOutputNoticeShown = true;
+  }
+}
+
+function createPlainTextPtyProjector() {
+  let state = "text";
+
+  const consume = (text, flushing = false) => {
+    let output = "";
+    let screenOriented = false;
+    const markScreenControl = () => { screenOriented = true; };
+
+    for (const character of text) {
+      let reprocess = true;
+      while (reprocess) {
+        reprocess = false;
+        const code = character.codePointAt(0);
+        if (state === "carriage-return") {
+          output += "\n";
+          state = "text";
+          if (character === "\n") break;
+          reprocess = true;
+        } else if (state === "escape") {
+          if (character === "[") {
+            state = "csi";
+            markScreenControl();
+          } else if (character === "]") {
+            state = "osc";
+            markScreenControl();
+          } else if (code >= 0x20 && code <= 0x2f) {
+            state = "escape-intermediate";
+          } else if (code >= 0x30 && code <= 0x7e) {
+            state = "text";
+            markScreenControl();
+          } else {
+            output += "␛";
+            state = "text";
+            reprocess = true;
+          }
+        } else if (state === "escape-intermediate") {
+          if (code >= 0x20 && code <= 0x2f) {
+            continue;
+          } else if (code >= 0x30 && code <= 0x7e) {
+            state = "text";
+            markScreenControl();
+          } else {
+            output += "␛[unsupported ESC control]";
+            state = "text";
+            reprocess = true;
+          }
+        } else if (state === "csi") {
+          if (code >= 0x40 && code <= 0x7e) {
+            state = "text";
+          } else if (!(code >= 0x20 && code <= 0x3f)) {
+            output += "[unsupported CSI control]";
+            state = "text";
+            reprocess = true;
+          }
+        } else if (state === "osc") {
+          if (character === "\u0007" || character === "\u009c") {
+            state = "text";
+          } else if (character === "\u001b") {
+            state = "osc-escape";
+          }
+        } else if (state === "osc-escape") {
+          if (character === "\\") {
+            state = "text";
+          } else {
+            state = character === "\u001b" ? "osc-escape" : "osc";
+          }
+        } else if (character === "\r") {
+          state = "carriage-return";
+        } else if (character === "\u001b") {
+          state = "escape";
+        } else if (character === "\u009b") {
+          state = "csi";
+          markScreenControl();
+        } else if (character === "\u009d") {
+          state = "osc";
+          markScreenControl();
+        } else if (isBidiFormattingControl(code)) {
+          output += visibleControlCharacter(code);
+        } else if (character === "\n" || character === "\t" || code >= 0x20 && code !== 0x7f && !(code >= 0x80 && code <= 0x9f)) {
+          output += character;
+        } else {
+          output += visibleControlCharacter(code);
+        }
+      }
+    }
+
+    if (flushing) {
+      if (state === "carriage-return") output += "\n";
+      if (state === "escape" || state === "escape-intermediate") output += "␛";
+      if (state === "csi") output += "[incomplete CSI control]";
+      if (state === "osc" || state === "osc-escape") output += "[incomplete OSC control]";
+      state = "text";
+    }
+    return { text: output, screenOriented };
+  };
+
+  return {
+    write(text) { return consume(text); },
+    flush() { return consume("", true); },
+    discard() { state = "text"; },
+  };
+}
+
+function makeControlsVisible(value) {
+  let visible = "";
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    visible += character === "\n" ? character
+      : code < 0x20 || code === 0x7f || code >= 0x80 && code <= 0x9f || isBidiFormattingControl(code)
+        ? visibleControlCharacter(code)
+        : character;
+  }
+  return visible;
+}
+
+function isBidiFormattingControl(code) {
+  return code === 0x061c
+    || code === 0x200e
+    || code === 0x200f
+    || code >= 0x202a && code <= 0x202e
+    || code >= 0x2066 && code <= 0x2069;
+}
+
+function visibleControlCharacter(code) {
+  if (code >= 0 && code <= 0x1f) return String.fromCodePoint(0x2400 + code);
+  if (code === 0x7f) return "␡";
+  return `[U+${code.toString(16).toUpperCase().padStart(4, "0")}]`;
 }
 
 function showTerminalError(error) {

@@ -6,3 +6,6 @@
 - `10:02` **server** via **codex** — structured-terminal-implementation.md — exit 0, 1045s — `.agents/runs/20260825-094512-server.out`
 - `10:28` **architecture** via **codex** — pty-session-design.md — exit 5, 613s — `.agents/runs/20260825-101845-architecture.out`
 - `10:36` **server** via **codex** — local-access-gate.md — exit 5, 636s — `.agents/runs/20260825-102615-server.out`
+- `11:04` **experience** via **codex** — plaintext-pty.md — exit 5, 448s — `.agents/runs/20260825-105730-experience.out`
+- `11:05` **server** via **codex** — pty-protocol-and-smoke.md — exit 5, 455s — `.agents/runs/20260825-105730-server.out`
+- `11:05` **runtime** via **codex** — real-container-pty.md — exit 5, 467s — `.agents/runs/20260825-105730-runtime.out`

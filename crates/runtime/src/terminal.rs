@@ -28,6 +28,8 @@ const PUMP_CAPACITY: usize = 32;
 const PROCESS_DRAIN_GRACE: Duration = Duration::from_millis(500);
 const PROCESS_FORCE_GRACE: Duration = Duration::from_secs(1);
 const READER_DRAIN_GRACE: Duration = Duration::from_millis(250);
+const MIN_TERMINAL_DIMENSION: u16 = 1;
+const MAX_TERMINAL_DIMENSION: u16 = 1000;
 
 type BoxReader = Box<dyn AsyncRead + Unpin + Send>;
 type BoxWriter = Box<dyn AsyncWrite + Unpin + Send>;
@@ -37,6 +39,18 @@ type WaitProcess = Box<dyn FnOnce(mpsc::Receiver<String>) -> ProcessWait + Send>
 pub enum TerminalInput {
     Text(String),
     Binary(Vec<u8>),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerminalDimensions {
+    columns: u16,
+    rows: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvalidTerminalDimensions {
+    columns: u16,
+    rows: u16,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -91,6 +105,7 @@ struct ActiveTerminal {
     accepting: Arc<AtomicBool>,
     stdin: Arc<Mutex<BoxWriter>>,
     events: broadcast::Sender<TerminalEvent>,
+    pty_path: String,
 }
 
 struct AttachmentParts {
@@ -105,6 +120,11 @@ struct TerminalProcess {
     stdout: BoxReader,
     stderr: BoxReader,
     wait: WaitProcess,
+}
+
+struct PreparedTerminal {
+    process: TerminalProcess,
+    pty_path: String,
 }
 
 struct SupervisedProcess {
@@ -143,6 +163,38 @@ enum ProcessEnd {
     Exited(Option<i32>),
     Failed(String),
 }
+
+impl TerminalDimensions {
+    pub fn new(columns: u16, rows: u16) -> Result<Self, InvalidTerminalDimensions> {
+        if (MIN_TERMINAL_DIMENSION..=MAX_TERMINAL_DIMENSION).contains(&columns)
+            && (MIN_TERMINAL_DIMENSION..=MAX_TERMINAL_DIMENSION).contains(&rows)
+        {
+            Ok(Self { columns, rows })
+        } else {
+            Err(InvalidTerminalDimensions { columns, rows })
+        }
+    }
+
+    pub fn columns(self) -> u16 {
+        self.columns
+    }
+
+    pub fn rows(self) -> u16 {
+        self.rows
+    }
+}
+
+impl fmt::Display for InvalidTerminalDimensions {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "terminal dimensions must each be in {MIN_TERMINAL_DIMENSION}..={MAX_TERMINAL_DIMENSION} (columns {}, rows {})",
+            self.columns, self.rows
+        )
+    }
+}
+
+impl std::error::Error for InvalidTerminalDimensions {}
 
 impl Utf8TranscriptDecoder {
     fn push(&mut self, bytes: &[u8]) -> String {
@@ -206,30 +258,52 @@ pub(crate) fn reserve(environment: Arc<Environment>) -> Result<TerminalReservati
 }
 
 impl TerminalReservation {
-    pub fn open(mut self) -> Result<TerminalAttachment, TerminalOpenError> {
-        self.open_with(|container| {
-            podman::spawn_terminal(container).and_then(TerminalProcess::from_child)
-        })
+    pub async fn open(
+        mut self,
+        initial: TerminalDimensions,
+    ) -> Result<TerminalAttachment, TerminalOpenError> {
+        self.open_with(
+            initial,
+            |container, generation, dimensions| async move {
+                let opened = podman::open_terminal(&container, generation, dimensions).await?;
+                Ok(PreparedTerminal {
+                    process: TerminalProcess::from_child(opened.child)?,
+                    pty_path: opened.pty_path,
+                })
+            },
+            |container, pty_path, dimensions| async move {
+                podman::resize_terminal(&container, &pty_path, dimensions).await
+            },
+        )
+        .await
     }
 
-    fn open_with(
+    async fn open_with<Open, OpenFuture, Resize, ResizeFuture>(
         &mut self,
-        spawn: impl FnOnce(&str) -> io::Result<TerminalProcess>,
-    ) -> Result<TerminalAttachment, TerminalOpenError> {
+        initial: TerminalDimensions,
+        open_fresh: Open,
+        resize: Resize,
+    ) -> Result<TerminalAttachment, TerminalOpenError>
+    where
+        Open: FnOnce(String, u64, TerminalDimensions) -> OpenFuture,
+        OpenFuture: Future<Output = io::Result<PreparedTerminal>>,
+        Resize: Fn(String, String, TerminalDimensions) -> ResizeFuture,
+        ResizeFuture: Future<Output = io::Result<()>>,
+    {
         let environment = self
             .environment
-            .take()
+            .as_ref()
+            .cloned()
             .expect("terminal reservation owns its environment");
         let parts = match environment
             .terminal()
-            .attach(environment.container_name(), spawn)
+            .attach_with(environment.container_name(), initial, open_fresh, resize)
+            .await
         {
             Ok(parts) => parts,
-            Err(error) => {
-                environment.close_terminal();
-                return Err(TerminalOpenError(error));
-            }
+            Err(error) => return Err(TerminalOpenError(error)),
         };
+        self.environment.take();
 
         Ok(TerminalAttachment {
             environment: Some(environment),
@@ -275,6 +349,17 @@ impl TerminalAttachment {
         result
     }
 
+    pub async fn resize(&mut self, dimensions: TerminalDimensions) -> io::Result<()> {
+        let environment = self
+            .environment
+            .as_ref()
+            .expect("open terminal attachment owns its environment");
+        environment
+            .terminal()
+            .resize(environment.container_name(), self.generation, dimensions)
+            .await
+    }
+
     pub async fn next_event(&mut self) -> Option<TerminalEvent> {
         match self.events.recv().await {
             Ok(event) => Some(event),
@@ -317,21 +402,28 @@ impl TerminalHub {
         }
     }
 
-    fn attach(
+    async fn attach_with<Open, OpenFuture, Resize, ResizeFuture>(
         &self,
         container: &str,
-        spawn: impl FnOnce(&str) -> io::Result<TerminalProcess>,
-    ) -> io::Result<AttachmentParts> {
-        let mut state = self.inner.state.lock().expect("terminal hub lock poisoned");
-        if let Some(active) = &state.active
-            && active.accepting.load(Ordering::Acquire)
-        {
-            return Ok(AttachmentParts {
-                generation: active.generation,
-                resumed: true,
-                stdin: active.stdin.clone(),
-                events: active.events.subscribe(),
-            });
+        dimensions: TerminalDimensions,
+        open_fresh: Open,
+        resize: Resize,
+    ) -> io::Result<AttachmentParts>
+    where
+        Open: FnOnce(String, u64, TerminalDimensions) -> OpenFuture,
+        OpenFuture: Future<Output = io::Result<PreparedTerminal>>,
+        Resize: Fn(String, String, TerminalDimensions) -> ResizeFuture,
+        ResizeFuture: Future<Output = io::Result<()>>,
+    {
+        if let Some(parts) = self.active_attachment(true) {
+            match self
+                .resize_with(container, parts.generation, dimensions, &resize)
+                .await
+            {
+                Ok(()) => return Ok(parts),
+                Err(error) if self.generation_is_live(parts.generation) => return Err(error),
+                Err(_) => {}
+            }
         }
 
         let handle = tokio::runtime::Handle::try_current().map_err(|error| {
@@ -339,20 +431,26 @@ impl TerminalHub {
                 "terminal must open inside a Tokio runtime: {error}"
             ))
         })?;
-        let process = spawn(container)?;
+        let generation = {
+            let mut state = self.inner.state.lock().expect("terminal hub lock poisoned");
+            let generation = state.next_generation;
+            state.next_generation += 1;
+            generation
+        };
+        let prepared = open_fresh(container.to_owned(), generation, dimensions).await?;
+        let PreparedTerminal { process, pty_path } = prepared;
         let TerminalProcess {
             stdin: process_stdin,
             stdout,
             stderr,
             wait,
         } = process;
-        let generation = state.next_generation;
-        state.next_generation += 1;
         let accepting = Arc::new(AtomicBool::new(true));
         let stdin = Arc::new(Mutex::new(process_stdin));
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
         let event_receiver = events.subscribe();
         let (stop, stop_receiver) = mpsc::channel(1);
+        let mut state = self.inner.state.lock().expect("terminal hub lock poisoned");
         state.processes.insert(generation, stop);
 
         state.active = Some(ActiveTerminal {
@@ -360,7 +458,9 @@ impl TerminalHub {
             accepting: accepting.clone(),
             stdin: stdin.clone(),
             events: events.clone(),
+            pty_path,
         });
+        drop(state);
         handle.spawn(supervise(
             Supervisor {
                 hub: Arc::downgrade(&self.inner),
@@ -381,6 +481,80 @@ impl TerminalHub {
             resumed: false,
             stdin,
             events: event_receiver,
+        })
+    }
+
+    fn active_attachment(&self, resumed: bool) -> Option<AttachmentParts> {
+        let state = self.inner.state.lock().expect("terminal hub lock poisoned");
+        let active = state.active.as_ref()?;
+        if !active.accepting.load(Ordering::Acquire) {
+            return None;
+        }
+        Some(AttachmentParts {
+            generation: active.generation,
+            resumed,
+            stdin: active.stdin.clone(),
+            events: active.events.subscribe(),
+        })
+    }
+
+    async fn resize(
+        &self,
+        container: &str,
+        generation: u64,
+        dimensions: TerminalDimensions,
+    ) -> io::Result<()> {
+        self.resize_with(
+            container,
+            generation,
+            dimensions,
+            &|container, pty_path, dimensions| async move {
+                podman::resize_terminal(&container, &pty_path, dimensions).await
+            },
+        )
+        .await
+    }
+
+    async fn resize_with<Resize, ResizeFuture>(
+        &self,
+        container: &str,
+        generation: u64,
+        dimensions: TerminalDimensions,
+        resize: &Resize,
+    ) -> io::Result<()>
+    where
+        Resize: Fn(String, String, TerminalDimensions) -> ResizeFuture,
+        ResizeFuture: Future<Output = io::Result<()>>,
+    {
+        let pty_path = {
+            let state = self.inner.state.lock().expect("terminal hub lock poisoned");
+            let active = state.active.as_ref().filter(|active| {
+                active.generation == generation && active.accepting.load(Ordering::Acquire)
+            });
+            active
+                .map(|active| active.pty_path.clone())
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotConnected,
+                        "terminal generation is not live",
+                    )
+                })?
+        };
+
+        resize(container.to_owned(), pty_path, dimensions).await?;
+        if !self.generation_is_live(generation) {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "terminal generation ended during resize",
+            ));
+        }
+        Ok(())
+    }
+
+    fn generation_is_live(&self, generation: u64) -> bool {
+        let state = self.inner.state.lock().expect("terminal hub lock poisoned");
+        state.active.as_ref().is_some_and(|active| {
+            active.generation == generation && active.accepting.load(Ordering::Acquire)
         })
     }
 
@@ -658,10 +832,14 @@ fn process_status(result: io::Result<std::process::ExitStatus>) -> ProcessEnd {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::Infallible, sync::atomic::AtomicUsize};
+    use std::{
+        convert::Infallible,
+        sync::{Mutex as StdMutex, atomic::AtomicUsize},
+    };
 
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt, DuplexStream},
+        sync::oneshot,
         time::{Duration, timeout},
     };
 
@@ -669,6 +847,30 @@ mod tests {
 
     fn environment() -> Arc<Environment> {
         Environment::for_test()
+    }
+
+    fn dimensions() -> TerminalDimensions {
+        TerminalDimensions::new(80, 24).unwrap()
+    }
+
+    fn prepared(process: TerminalProcess) -> PreparedTerminal {
+        PreparedTerminal {
+            process,
+            pty_path: "/dev/pts/7".into(),
+        }
+    }
+
+    async fn open_process(
+        reservation: &mut TerminalReservation,
+        process: TerminalProcess,
+    ) -> Result<TerminalAttachment, TerminalOpenError> {
+        reservation
+            .open_with(
+                dimensions(),
+                move |_, _, _| async move { Ok(prepared(process)) },
+                |_, _, _| async { Ok(()) },
+            )
+            .await
     }
 
     fn running_process() -> (TerminalProcess, DuplexStream, DuplexStream) {
@@ -697,6 +899,21 @@ mod tests {
     }
 
     #[test]
+    fn terminal_dimensions_enforce_inclusive_bounds() {
+        for (columns, rows) in [(1, 1), (1, 1000), (1000, 1), (1000, 1000)] {
+            let dimensions = TerminalDimensions::new(columns, rows).unwrap();
+            assert_eq!(dimensions.columns(), columns);
+            assert_eq!(dimensions.rows(), rows);
+        }
+        for (columns, rows) in [(0, 1), (1, 0), (1001, 1), (1, 1001)] {
+            assert_eq!(
+                TerminalDimensions::new(columns, rows),
+                Err(InvalidTerminalDimensions { columns, rows })
+            );
+        }
+    }
+
+    #[test]
     fn dropping_reservation_releases_admission() {
         let environment = environment();
         drop(reserve(environment.clone()).unwrap());
@@ -708,7 +925,12 @@ mod tests {
         let environment = environment();
         let mut reservation = reserve(environment.clone()).unwrap();
         let result = reservation
-            .open_with(|_| Err(io::Error::new(io::ErrorKind::NotFound, "missing podman")));
+            .open_with(
+                dimensions(),
+                |_, _, _| async { Err(io::Error::new(io::ErrorKind::NotFound, "missing podman")) },
+                |_, _, _| async { Ok(()) },
+            )
+            .await;
         assert!(result.is_err());
         drop(reservation);
         assert!(reserve(environment).is_ok());
@@ -719,7 +941,7 @@ mod tests {
         let environment = environment();
         let (process, _, _) = running_process();
         let mut reservation = reserve(environment.clone()).unwrap();
-        let attachment = reservation.open_with(|_| Ok(process)).unwrap();
+        let attachment = open_process(&mut reservation, process).await.unwrap();
         let error = reserve(environment.clone())
             .err()
             .expect("a second attachment must conflict");
@@ -727,12 +949,85 @@ mod tests {
 
         attachment.close().await;
         let mut reservation = reserve(environment).unwrap();
-        let attachment = reservation
-            .open_with(|_| -> io::Result<TerminalProcess> {
-                panic!("closing an attachment must not stop its terminal")
-            })
+        let (unused_process, _, _) = running_process();
+        let attachment = open_process(&mut reservation, unused_process)
+            .await
             .unwrap();
         drop(attachment);
+    }
+
+    #[tokio::test]
+    async fn fresh_and_resumed_open_apply_requested_size_to_one_generation() {
+        let environment = environment();
+        let calls = Arc::new(StdMutex::new(Vec::new()));
+        let spawns = Arc::new(AtomicUsize::new(0));
+        let (process, _, _) = running_process();
+
+        let mut reservation = reserve(environment.clone()).unwrap();
+        let fresh_calls = calls.clone();
+        let fresh_spawns = spawns.clone();
+        let first_size = TerminalDimensions::new(132, 43).unwrap();
+        let first = reservation
+            .open_with(
+                first_size,
+                move |_, _, dimensions| async move {
+                    fresh_spawns.fetch_add(1, Ordering::Relaxed);
+                    fresh_calls.lock().unwrap().push((
+                        "fresh",
+                        dimensions,
+                        "/dev/pts/41".to_owned(),
+                    ));
+                    Ok(PreparedTerminal {
+                        process,
+                        pty_path: "/dev/pts/41".into(),
+                    })
+                },
+                |_, _, _| async { Ok(()) },
+            )
+            .await
+            .unwrap();
+        assert!(!first.resumed());
+        assert_eq!(spawns.load(Ordering::Relaxed), 1);
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        drop(first);
+
+        let (unused_process, _, _) = running_process();
+        let resumed_calls = calls.clone();
+        let resumed_spawns = spawns.clone();
+        let second_size = TerminalDimensions::new(151, 47).unwrap();
+        let mut reservation = reserve(environment).unwrap();
+        let mut second = reservation
+            .open_with(
+                second_size,
+                move |_, _, _| async move {
+                    resumed_spawns.fetch_add(1, Ordering::Relaxed);
+                    Ok(prepared(unused_process))
+                },
+                move |_, path, dimensions| {
+                    let calls = resumed_calls.clone();
+                    async move {
+                        calls.lock().unwrap().push(("resize", dimensions, path));
+                        Ok(())
+                    }
+                },
+            )
+            .await
+            .unwrap();
+        assert!(second.resumed());
+        assert_eq!(spawns.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            calls.lock().unwrap().as_slice(),
+            [
+                ("fresh", first_size, "/dev/pts/41".to_owned()),
+                ("resize", second_size, "/dev/pts/41".to_owned()),
+            ]
+        );
+        assert!(
+            timeout(Duration::from_millis(20), second.next_event())
+                .await
+                .is_err(),
+            "reattach must not replay output"
+        );
     }
 
     #[tokio::test]
@@ -740,7 +1035,7 @@ mod tests {
         let environment = environment();
         let (process, mut input, mut output) = running_process();
         let mut reservation = reserve(environment.clone()).unwrap();
-        let mut attachment = reservation.open_with(|_| Ok(process)).unwrap();
+        let mut attachment = open_process(&mut reservation, process).await.unwrap();
         assert!(!attachment.resumed());
 
         output.write_all(&[0xff, b'a']).await.unwrap();
@@ -761,10 +1056,9 @@ mod tests {
         wait_for_transcript(&environment, 3).await;
 
         let mut reservation = reserve(environment.clone()).unwrap();
-        let mut attachment = reservation
-            .open_with(|_| -> io::Result<TerminalProcess> {
-                panic!("a reconnect must not spawn a second terminal")
-            })
+        let (unused_process, _, _) = running_process();
+        let mut attachment = open_process(&mut reservation, unused_process)
+            .await
             .unwrap();
         assert!(attachment.resumed());
         assert!(
@@ -794,6 +1088,113 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stale_resize_cannot_target_a_new_generation_with_the_same_path() {
+        let environment = environment();
+        let mut reservation = reserve(environment.clone()).unwrap();
+        let mut first = open_process(&mut reservation, ended_process(ProcessEnd::Exited(Some(0))))
+            .await
+            .unwrap();
+        let stale_generation = first.generation;
+        assert_eq!(
+            first.next_event().await,
+            Some(TerminalEvent::Exited { code: Some(0) })
+        );
+        drop(first);
+        environment.terminal().wait_for_processes().await;
+
+        let (process, _, _) = running_process();
+        let mut reservation = reserve(environment.clone()).unwrap();
+        let second = open_process(&mut reservation, process).await.unwrap();
+        assert_ne!(second.generation, stale_generation);
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let resize_calls = calls.clone();
+        let result = environment
+            .terminal()
+            .resize_with("none", stale_generation, dimensions(), &move |_, _, _| {
+                resize_calls.fetch_add(1, Ordering::Relaxed);
+                std::future::ready(Ok(()))
+            })
+            .await;
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::NotConnected);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        drop(second);
+    }
+
+    #[tokio::test]
+    async fn resize_failure_is_explicit_and_never_recorded() {
+        let environment = environment();
+        let (process, _, _) = running_process();
+        let mut reservation = reserve(environment.clone()).unwrap();
+        let attachment = open_process(&mut reservation, process).await.unwrap();
+
+        let error = environment
+            .terminal()
+            .resize_with("none", attachment.generation, dimensions(), &|_, _, _| {
+                std::future::ready(Err(io::Error::other("stty rejected resize")))
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "stty rejected resize");
+        assert!(environment.transcript_snapshot().await.is_empty());
+        drop(attachment);
+    }
+
+    #[tokio::test]
+    async fn raw_etx_is_written_and_recorded_only_after_success() {
+        let environment = environment();
+        let (process, mut input, _) = running_process();
+        let mut reservation = reserve(environment.clone()).unwrap();
+        let mut attachment = open_process(&mut reservation, process).await.unwrap();
+
+        attachment
+            .send(TerminalInput::Binary(vec![0x03]))
+            .await
+            .unwrap();
+        let mut sent = [0_u8; 1];
+        input.read_exact(&mut sent).await.unwrap();
+        assert_eq!(sent, [0x03]);
+        wait_for_transcript(&environment, 1).await;
+        let transcript = environment.transcript_snapshot().await;
+        assert_eq!(transcript.len(), 1);
+        assert_eq!(transcript[0].direction, "input");
+        assert_eq!(transcript[0].data.as_bytes(), [0x03]);
+    }
+
+    #[tokio::test]
+    async fn output_is_drained_before_the_exit_event() {
+        let environment = environment();
+        let (test_stdout, process_stdout) = tokio::io::duplex(64);
+        let (finish, finished) = oneshot::channel();
+        let process = TerminalProcess {
+            stdin: Box::new(tokio::io::sink()),
+            stdout: Box::new(process_stdout),
+            stderr: Box::new(tokio::io::empty()),
+            wait: Box::new(move |_stop| {
+                Box::pin(async move {
+                    finished.await.unwrap();
+                    ProcessEnd::Exited(Some(9))
+                }) as ProcessWait
+            }),
+        };
+        let mut reservation = reserve(environment).unwrap();
+        let mut attachment = open_process(&mut reservation, process).await.unwrap();
+
+        let mut test_stdout = test_stdout;
+        test_stdout.write_all(b"last bytes").await.unwrap();
+        test_stdout.shutdown().await.unwrap();
+        finish.send(()).unwrap();
+        assert_eq!(
+            attachment.next_event().await,
+            Some(TerminalEvent::Output(b"last bytes".to_vec()))
+        );
+        assert_eq!(
+            attachment.next_event().await,
+            Some(TerminalEvent::Exited { code: Some(9) })
+        );
+    }
+
+    #[tokio::test]
     async fn exit_and_failure_allow_a_fresh_terminal() {
         for expected in [
             TerminalEvent::Exited { code: Some(7) },
@@ -806,7 +1207,9 @@ mod tests {
                 TerminalEvent::Output(_) | TerminalEvent::OutputGap { .. } => unreachable!(),
             };
             let mut reservation = reserve(environment.clone()).unwrap();
-            let mut attachment = reservation.open_with(|_| Ok(ended_process(end))).unwrap();
+            let mut attachment = open_process(&mut reservation, ended_process(end))
+                .await
+                .unwrap();
             assert_eq!(attachment.next_event().await, Some(expected));
             drop(attachment);
             environment.terminal().wait_for_processes().await;
@@ -816,10 +1219,15 @@ mod tests {
             let (process, _, _) = running_process();
             let mut reservation = reserve(environment).unwrap();
             let attachment = reservation
-                .open_with(|_| {
-                    counted.fetch_add(1, Ordering::Relaxed);
-                    Ok(process)
-                })
+                .open_with(
+                    dimensions(),
+                    move |_, _, _| async move {
+                        counted.fetch_add(1, Ordering::Relaxed);
+                        Ok(prepared(process))
+                    },
+                    |_, _, _| async { Ok(()) },
+                )
+                .await
                 .unwrap();
             assert_eq!(spawns.load(Ordering::Relaxed), 1);
             drop(attachment);
@@ -831,7 +1239,7 @@ mod tests {
         let environment = environment();
         let (process, _, _) = running_process();
         let mut reservation = reserve(environment.clone()).unwrap();
-        let mut attachment = reservation.open_with(|_| Ok(process)).unwrap();
+        let mut attachment = open_process(&mut reservation, process).await.unwrap();
         {
             let state = environment
                 .terminal()
@@ -872,7 +1280,7 @@ mod tests {
             wait: Box::new(|_stop| Box::pin(async { ProcessEnd::Exited(Some(0)) }) as ProcessWait),
         };
         let mut reservation = reserve(environment.clone()).unwrap();
-        let mut attachment = reservation.open_with(|_| Ok(process)).unwrap();
+        let mut attachment = open_process(&mut reservation, process).await.unwrap();
 
         assert_eq!(
             timeout(Duration::from_secs(1), attachment.next_event())
@@ -907,7 +1315,7 @@ mod tests {
             }),
         };
         let mut reservation = reserve(environment.clone()).unwrap();
-        let attachment = reservation.open_with(|_| Ok(process)).unwrap();
+        let attachment = open_process(&mut reservation, process).await.unwrap();
         drop(attachment);
 
         assert!(
@@ -924,7 +1332,7 @@ mod tests {
         let environment = environment();
         let (process, _, _) = running_process();
         let mut reservation = reserve(environment.clone()).unwrap();
-        let attachment = reservation.open_with(|_| Ok(process)).unwrap();
+        let attachment = open_process(&mut reservation, process).await.unwrap();
         drop(attachment);
 
         let settled = timeout(Duration::from_millis(100), async {
@@ -954,7 +1362,7 @@ mod tests {
             }),
         };
         let mut reservation = reserve(environment.clone()).unwrap();
-        let mut attachment = reservation.open_with(|_| Ok(process)).unwrap();
+        let mut attachment = open_process(&mut reservation, process).await.unwrap();
 
         let write_error = attachment
             .send(TerminalInput::Text("never executed\n".into()))

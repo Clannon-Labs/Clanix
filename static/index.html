@@ -57,7 +57,7 @@
         <article class="terminal-panel">
           <header class="panel-header">
             <div>
-              <p class="panel-index">Live / shell</p>
+              <p class="panel-index">Live / PTY · plain text</p>
               <h2>Terminal</h2>
             </div>
             <div class="terminal-meta">
@@ -66,12 +66,13 @@
               <span class="container-label" id="environment-id">waiting for environment</span>
             </div>
           </header>
-          <pre id="terminal-output" class="terminal-output" tabindex="0" aria-label="Terminal output">Create an environment to open the shell.</pre>
+          <pre id="terminal-output" class="terminal-output" tabindex="0" aria-label="Plain-text PTY output">Create an environment to open the shell.</pre>
           <form id="terminal-form" class="command-line">
             <label id="command-prompt" for="command" aria-label="Shell command">$</label>
             <textarea id="command" name="command" rows="1" autocomplete="off" spellcheck="false" aria-describedby="command-help" placeholder="printf 'hello, system\n'" disabled></textarea>
-            <span id="command-help" class="visually-hidden">Press Enter to run. A trailing backslash or Shift+Enter starts a new line.</span>
+            <span id="command-help" class="visually-hidden">Press Enter to run. A trailing backslash or Shift+Enter starts a new line. The Ctrl-C button interrupts the running shell without changing this draft.</span>
             <button id="reconnect" type="button" hidden>Reconnect</button>
+            <button id="interrupt" type="button" aria-label="Send Ctrl-C to the running shell" disabled>Ctrl-C</button>
             <button type="submit" disabled>Run</button>
           </form>
         </article>

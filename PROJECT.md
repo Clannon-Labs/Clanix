@@ -36,8 +36,8 @@ does not call a model or generate explanations.
   server capability before runtime state is accessed.
 - **Create environment** starts a rootless Podman container with a writable
   `/workspace` and returns an opaque environment ID.
-- The browser terminal sends input over a WebSocket to `/bin/sh` inside that
-  container and streams stdout/stderr back.
+- The browser terminal drives `/bin/sh` on a real container PTY, including
+  initial sizing, later resize controls, and raw control bytes such as Ctrl-C.
 - The observation endpoint returns JSON containing transcript, process, file,
   and network data gathered from that container.
 - **Destroy environment** force-removes the container. Reusing its ID fails.
@@ -51,9 +51,11 @@ control before the runtime attachment opens, and becomes ready only after the
 server's structured `ready` control. The server streams terminal output as raw
 binary frames and reserves its text frames for structured ready, exit, or error
 controls. After ready, clients may send bounded structured text or raw binary
-input. A detached live shell may be reattached; recently captured output from
-the detached interval remains available subject to the transcript retention
-limit, but is not replayed into the reattached live stream.
+input or validated resize controls. A detached live shell may be reattached;
+recently captured output from the detached interval remains available subject
+to the transcript retention limit, but is not replayed into the reattached live
+stream. The dependency-free browser renders a control-safe plain-text PTY log;
+it is intentionally not a screen terminal emulator.
 
 ## Architecture principles
 

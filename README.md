@@ -10,7 +10,8 @@ decisions that keep the project small live in [`PROJECT.md`](PROJECT.md).
 ## What works
 
 - A Rust server creates and destroys rootless Podman containers.
-- A dependency-free browser UI provides a command terminal over WebSockets.
+- A dependency-free browser UI drives a real, resizable container PTY over
+  WebSockets, including Ctrl-C and reconnectable shell sessions.
 - Snapshot observations show the terminal transcript, processes, workspace files,
   and Linux TCP/UDP socket tables.
 - State is deliberately in memory; stopping the server cleans up its containers.
@@ -71,12 +72,14 @@ cargo test --workspace
 ```
 
 Unit tests do not require Podman. The smoke test requires working rootless user
-namespaces and exercises create, WebSocket command execution, observations,
-destroy, access-gate rejection, and rejection of the destroyed ID.
+namespaces and exercises create, PTY sizing and resize, foreground interruption,
+reconnection, observations, destroy, access-gate rejection, and rejection of
+the destroyed ID.
 
 ## Current boundaries
 
-This is a truthful V0: the browser is a command console rather than a full PTY
-emulator; observations are point-in-time snapshots rather than a timeline; and
-rootless Podman is useful isolation but not a hardened hostile multi-tenant
-security boundary. See `PROJECT.md` before widening the scope.
+This is a truthful V0: the shell runs on a real container PTY, while the browser
+shows a control-safe plain-text log rather than a full screen-terminal emulator.
+Observations are point-in-time snapshots rather than a timeline, and rootless
+Podman is useful isolation but not a hardened hostile multi-tenant security
+boundary. See `PROJECT.md` before widening the scope.

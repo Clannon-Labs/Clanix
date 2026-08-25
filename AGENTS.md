@@ -35,6 +35,8 @@ Read `PROJECT.md` before changing product behavior.
 - Build the smallest complete vertical slice that advances the current V0.
 - Keep the Rust readable to a beginner/intermediate Rust programmer. Prefer plain
   data structures and explicit control flow over framework-heavy abstractions.
+- Preserve the browser's clean, fast visual system. Backend behavior should earn
+  UI changes; extend the existing surface instead of restyling it speculatively.
 - Keep the runtime local and single-node until measured needs prove otherwise.
 - Use rootless Podman as the isolation boundary. Never silently fall back to
   running guest commands on the host.

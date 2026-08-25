@@ -29,6 +29,11 @@ does not call a model or generate explanations.
 ## V0 acceptance criteria
 
 - `cargo run` starts one local Rust process and serves the UI.
+- The server accepts loopback binds only and prints a fresh capability-bearing
+  private URL derived from its actual listening address.
+- Static assets require an exact local Host. Every API and terminal WebSocket
+  request additionally requires an allowed Origin when present and the current
+  server capability before runtime state is accessed.
 - **Create environment** starts a rootless Podman container with a writable
   `/workspace` and returns an opaque environment ID.
 - The browser terminal sends input over a WebSocket to `/bin/sh` inside that

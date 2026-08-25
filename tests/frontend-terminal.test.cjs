@@ -5,6 +5,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const appSource = fs.readFileSync(path.join(__dirname, "../static/app.js"), "utf8");
+const ACCESS_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 function createElement(textContent = "") {
   const listeners = new Map();
@@ -45,9 +46,24 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
   const output = element("#terminal-output", "Create an environment to open the shell.");
   const run = element("#terminal-form button[type='submit']");
   const storedValues = new Map();
+  const sessionValues = new Map();
   const fetches = [];
   const decoders = [];
+  const historyCalls = [];
+  const locationReplacements = [];
+  const windowListeners = new Map();
+  let resolveDeferredCreate;
+  let resolveDeferredDestroy;
+  const deferredCreate = options.deferCreate
+    ? new Promise((resolve) => { resolveDeferredCreate = resolve; })
+    : null;
+  const deferredDestroy = options.deferDestroy
+    ? new Promise((resolve) => { resolveDeferredDestroy = resolve; })
+    : null;
   if (storedTheme !== null) storedValues.set("clannon-color-theme", storedTheme);
+  if (options.storedToken !== undefined) {
+    sessionValues.set("clannon-access-token", options.storedToken);
+  }
   form.requestSubmit = () => {
     void form.dispatch("submit", { preventDefault() {} });
   };
@@ -135,14 +151,37 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
     },
     fetch: async (url, requestOptions = {}) => {
       fetches.push({ url, options: requestOptions });
-      if (url === "/api/environments" && requestOptions.method === "POST") {
-        return response(200, { id: "env-test" });
+      if (url === "/api/access") {
+        return response(options.accessProbeStatus ?? 204, {});
       }
+      if (url === "/api/environments" && requestOptions.method === "POST") {
+        if (deferredCreate) return deferredCreate;
+        return response(options.createStatus ?? 200, options.createStatus === 401
+          ? { error: "unauthorized" }
+          : { id: "env-test" });
+      }
+      if (requestOptions.method === "DELETE" && deferredDestroy) return deferredDestroy;
       return response(200, emptySnapshot);
     },
     location: {
-      host: "localhost",
+      hash: options.hash ?? `#${ACCESS_TOKEN}`,
+      host: "localhost:3000",
+      pathname: "/",
       protocol: "http:",
+      search: "",
+      replace(url) {
+        if (options.locationReplaceFails) throw new Error("location replacement unavailable");
+        locationReplacements.push(url);
+        this.hash = "";
+      },
+    },
+    history: {
+      state: { test: true },
+      replaceState(state, title, url) {
+        if (options.historyFails) throw new Error("history unavailable");
+        historyCalls.push({ state, title, url });
+        context.location.hash = "";
+      },
     },
     localStorage: {
       getItem(key) {
@@ -154,43 +193,85 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
         storedValues.set(key, value);
       },
     },
+    sessionStorage: {
+      getItem(key) {
+        if (options.sessionStorageFails) throw new Error("session storage unavailable");
+        return sessionValues.get(key) ?? null;
+      },
+      setItem(key, value) {
+        if (options.sessionStorageFails) throw new Error("session storage unavailable");
+        sessionValues.set(key, value);
+      },
+      removeItem(key) {
+        if (options.sessionStorageFails) throw new Error("session storage unavailable");
+        sessionValues.delete(key);
+      },
+    },
     ArrayBuffer,
     TextDecoder: TrackingTextDecoder,
     TextEncoder,
     WebSocket: MockWebSocket,
     window: {
-      addEventListener() {},
+      addEventListener(type, listener) {
+        const handlers = windowListeners.get(type) ?? [];
+        handlers.push(listener);
+        windowListeners.set(type, handlers);
+      },
       requestAnimationFrame(callback) { callback(); },
       setTimeout() {},
     },
   };
 
   vm.runInNewContext(appSource, context);
-  await element("#create").dispatch("click");
-  assert.equal(sockets.length, 1);
-  sockets[0].open();
-  if (options.autoReady !== false && sockets[0].readyState === MockWebSocket.OPEN) {
+  if (options.create !== false) {
+    await element("#create").dispatch("click");
+    if (options.createStatus !== 401 && options.openSocket !== false) {
+      assert.equal(sockets.length, 1);
+      sockets[0].open();
+    }
+  }
+  if (options.create !== false && options.createStatus !== 401
+    && options.openSocket !== false && options.autoReady !== false
+    && sockets[0].readyState === MockWebSocket.OPEN) {
     sockets[0].message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: false }));
   }
   return {
     announcement: element("#terminal-announcement"),
     colorTheme: element("#color-theme"),
     command,
+    create: element("#create"),
     decoders,
     documentElement: context.document.documentElement,
     destroy: element("#destroy"),
+    environmentId: element("#environment-id"),
     fetches,
     form,
+    historyCalls,
+    location: context.location,
+    locationReplacements,
     output,
     prompt: element("#command-prompt"),
     reconnect: element("#reconnect"),
+    refresh: element("#refresh"),
     run,
+    resolveCreate(status, body = { error: "unauthorized" }) {
+      resolveDeferredCreate?.(response(status, body));
+    },
+    resolveDestroy(status, body = { error: "destroy failed" }) {
+      resolveDeferredDestroy?.(response(status, body));
+    },
     socket: sockets[0],
     sockets,
+    stateLabel: element("#state-label"),
     status: element("#terminal-status"),
     storedValues,
+    sessionValues,
     transcript: element("#transcript"),
     transcriptCount: element("#transcript-count"),
+    async dispatchWindow(type, event = {}) {
+      const results = (windowListeners.get(type) ?? []).map((listener) => listener(event));
+      await Promise.all(results);
+    },
   };
 }
 
@@ -212,6 +293,188 @@ function enterEvent(overrides = {}) {
     ...overrides,
   };
 }
+
+test("moves a fragment capability into tab storage and authenticates every API and WebSocket request", async () => {
+  const terminal = await openTerminal();
+
+  assert.equal(terminal.sessionValues.get("clannon-access-token"), ACCESS_TOKEN);
+  assert.deepEqual(terminal.historyCalls, [{ state: { test: true }, title: "", url: "/" }]);
+  assert.equal(
+    terminal.socket.url,
+    `ws://localhost:3000/api/environments/env-test/terminal?access_token=${ACCESS_TOKEN}`,
+  );
+
+  await terminal.destroy.dispatch("click");
+  assert.ok(terminal.fetches.length >= 3);
+  for (const request of terminal.fetches) {
+    assert.equal(request.options.headers.Authorization, `Bearer ${ACCESS_TOKEN}`);
+  }
+  assert.equal(terminal.storedValues.has("clannon-access-token"), false);
+});
+
+test("reuses a tab capability on reload and lets a fresh fragment replace a stale one", async () => {
+  const reload = await openTerminal(null, false, null, {
+    hash: "",
+    storedToken: ACCESS_TOKEN,
+  });
+  assert.equal(reload.historyCalls.length, 0);
+  assert.equal(reload.fetches[0].options.headers.Authorization, `Bearer ${ACCESS_TOKEN}`);
+
+  const replacement = "f".repeat(64);
+  const refreshed = await openTerminal(null, false, null, {
+    hash: `#${replacement}`,
+    storedToken: ACCESS_TOKEN,
+  });
+  assert.equal(refreshed.sessionValues.get("clannon-access-token"), replacement);
+  assert.equal(refreshed.fetches[0].options.headers.Authorization, `Bearer ${replacement}`);
+  assert.match(refreshed.socket.url, new RegExp(`access_token=${replacement}$`));
+});
+
+test("keeps the workbench readable and non-operational without a capability", async () => {
+  const terminal = await openTerminal(null, false, null, { hash: "", create: false });
+
+  assert.equal(terminal.sockets.length, 0);
+  assert.equal(terminal.fetches.length, 0);
+  assert.equal(terminal.create.disabled, true);
+  assert.equal(terminal.destroy.disabled, true);
+  assert.equal(terminal.refresh.disabled, true);
+  assert.equal(terminal.run.disabled, true);
+  assert.equal(terminal.command.disabled, true);
+  assert.equal(terminal.stateLabel.textContent, "Private access required");
+  assert.equal(terminal.output.textContent, "Open the private URL printed by Clannon.");
+});
+
+test("contains session-storage and history failures while preserving fragment access", async () => {
+  const terminal = await openTerminal(null, false, null, {
+    create: false,
+    historyFails: true,
+    sessionStorageFails: true,
+  });
+
+  assert.match(terminal.output.textContent, /Private URL remains in the address bar/);
+  await terminal.create.dispatch("click");
+  terminal.sockets[0].open();
+  terminal.sockets[0].message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: false }));
+  assert.equal(terminal.fetches[0].options.headers.Authorization, `Bearer ${ACCESS_TOKEN}`);
+  assert.match(terminal.sockets[0].url, new RegExp(`access_token=${ACCESS_TOKEN}$`));
+  assert.equal(terminal.status.textContent, "Ready");
+});
+
+test("falls back to a clean reload when history fails but tab storage works", async () => {
+  const terminal = await openTerminal(null, false, null, {
+    create: false,
+    historyFails: true,
+  });
+
+  assert.deepEqual(terminal.locationReplacements, ["/"]);
+  assert.equal(terminal.sessionValues.get("clannon-access-token"), ACCESS_TOKEN);
+});
+
+test("accepts a private URL pasted into an already-open locked tab", async () => {
+  const terminal = await openTerminal(null, false, null, { hash: "", create: false });
+  assert.equal(terminal.status.textContent, "Locked");
+
+  terminal.location.hash = `#${ACCESS_TOKEN}`;
+  await terminal.dispatchWindow("hashchange");
+
+  assert.equal(terminal.sessionValues.get("clannon-access-token"), ACCESS_TOKEN);
+  assert.equal(terminal.location.hash, "");
+  assert.equal(terminal.status.textContent, "Disconnected");
+  assert.equal(terminal.create.disabled, false);
+  assert.match(terminal.output.textContent, /Private access restored/);
+  const probe = terminal.fetches.find(({ url }) => url === "/api/access");
+  assert.equal(probe.options.cache, "no-store");
+  assert.equal(probe.options.headers.Authorization, `Bearer ${ACCESS_TOKEN}`);
+});
+
+test("rejects an unverified fragment without replacing the current access state", async () => {
+  const terminal = await openTerminal(null, false, null, {
+    accessProbeStatus: 401,
+    hash: "",
+    create: false,
+  });
+
+  terminal.location.hash = `#${ACCESS_TOKEN}`;
+  await terminal.dispatchWindow("hashchange");
+
+  assert.equal(terminal.sessionValues.has("clannon-access-token"), false);
+  assert.equal(terminal.status.textContent, "Locked");
+  assert.match(terminal.announcement.textContent, /private URL was rejected/i);
+});
+
+test("a late 401 from an old credential cannot clear newly verified access", async () => {
+  const replacement = "f".repeat(64);
+  const terminal = await openTerminal(null, false, null, {
+    create: false,
+    deferCreate: true,
+  });
+
+  const pendingCreate = terminal.create.dispatch("click");
+  await new Promise((resolve) => setImmediate(resolve));
+  terminal.location.hash = `#${replacement}`;
+  await terminal.dispatchWindow("hashchange");
+  terminal.resolveCreate(401);
+  await pendingCreate;
+
+  assert.equal(terminal.sessionValues.get("clannon-access-token"), replacement);
+  assert.notEqual(terminal.status.textContent, "Locked");
+  assert.equal(terminal.create.disabled, false);
+});
+
+test("a stale destroy failure cannot restore an environment after access recovery", async () => {
+  const replacement = "e".repeat(64);
+  const terminal = await openTerminal(null, false, null, { deferDestroy: true });
+
+  const pendingDestroy = terminal.destroy.dispatch("click");
+  await new Promise((resolve) => setImmediate(resolve));
+  terminal.location.hash = `#${replacement}`;
+  await terminal.dispatchWindow("hashchange");
+  terminal.resolveDestroy(502);
+  await pendingDestroy;
+
+  assert.equal(terminal.sessionValues.get("clannon-access-token"), replacement);
+  assert.equal(terminal.environmentId.textContent, "waiting for environment");
+  assert.equal(terminal.stateLabel.textContent, "No environment");
+  assert.equal(terminal.create.disabled, false);
+  assert.equal(terminal.destroy.disabled, true);
+  assert.doesNotMatch(terminal.output.textContent, /destroy failed/i);
+});
+
+test("a 401 clears tab access and leaves every operation safely disabled", async () => {
+  const terminal = await openTerminal(null, false, null, { createStatus: 401 });
+
+  assert.equal(terminal.sockets.length, 0);
+  assert.equal(terminal.sessionValues.has("clannon-access-token"), false);
+  assert.equal(terminal.create.disabled, true);
+  assert.equal(terminal.destroy.disabled, true);
+  assert.equal(terminal.refresh.disabled, true);
+  assert.equal(terminal.run.disabled, true);
+  assert.equal(terminal.command.disabled, true);
+  assert.equal(terminal.status.textContent, "Locked");
+  assert.equal(terminal.announcement.textContent, "Open the private URL printed by Clannon.");
+  assert.match(terminal.output.textContent, /Open the private URL printed by Clannon\./);
+  assert.doesNotMatch(terminal.output.textContent, new RegExp(ACCESS_TOKEN));
+});
+
+test("locks a stale tab when its terminal upgrade and authenticated access probe are rejected", async () => {
+  const terminal = await openTerminal(null, false, null, {
+    accessProbeStatus: 401,
+    autoReady: false,
+    openSocket: false,
+  });
+
+  terminal.socket.close(1006, "upgrade rejected");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const probe = terminal.fetches.find(({ url }) => url === "/api/access");
+  assert.ok(probe);
+  assert.equal(probe.options.cache, "no-store");
+  assert.equal(probe.options.headers.Authorization, `Bearer ${ACCESS_TOKEN}`);
+  assert.equal(terminal.sessionValues.has("clannon-access-token"), false);
+  assert.equal(terminal.status.textContent, "Locked");
+  assert.equal(terminal.reconnect.hidden, true);
+  assert.equal(terminal.create.disabled, true);
+});
 
 test("negotiates v1 and waits for ready before enabling Run", async () => {
   const terminal = await openTerminal(null, false, null, { autoReady: false });

@@ -33,7 +33,13 @@ podman info --format '{{.Host.Security.Rootless}}'
 cargo run
 ```
 
-Then open <http://127.0.0.1:3000>. Create an environment, run commands such as:
+Clannon prints a fresh private URL such as
+`http://127.0.0.1:3000/#<capability>`. Open that complete URL in the browser;
+the fragment is moved into tab-scoped session storage before API or terminal
+access is enabled. If the fragment is missing and the tab has no saved
+capability, the workbench remains readable but non-operational.
+
+Create an environment, then run commands such as:
 
 ```sh
 printf 'hello from Clannon\n'
@@ -51,6 +57,12 @@ CLANNON_BIND=127.0.0.1:4000 cargo run
 CLANNON_IMAGE=docker.io/library/alpine:3.20 cargo run
 ```
 
+Only numeric IPv4 or IPv6 loopback bind addresses are supported. Port `0` is
+allowed; Clannon prints the actual selected port in its private URL. API clients
+must use an allowed `Host`, an optional matching HTTP `Origin`, and
+`Authorization: Bearer <capability>`. The terminal WebSocket carries the same
+capability in its `access_token` query parameter.
+
 ## Verify
 
 ```sh
@@ -60,7 +72,7 @@ cargo test --workspace
 
 Unit tests do not require Podman. The smoke test requires working rootless user
 namespaces and exercises create, WebSocket command execution, observations,
-destroy, and rejection of the destroyed ID.
+destroy, access-gate rejection, and rejection of the destroyed ID.
 
 ## Current boundaries
 

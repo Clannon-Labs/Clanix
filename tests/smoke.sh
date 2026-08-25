@@ -3,7 +3,10 @@ set -euo pipefail
 
 project_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 bind_address=${CLANNON_SMOKE_BIND:-127.0.0.1:39081}
-base_url="http://${bind_address}"
+base_url=""
+authority=""
+origin=""
+access_token=""
 server_log=$(mktemp)
 snapshot_file=$(mktemp)
 environment_id=""
@@ -11,10 +14,25 @@ server_pid=""
 
 cleanup() {
   if [[ -n "$environment_id" ]]; then
-    curl --silent --max-time 5 --request DELETE "$base_url/api/environments/$environment_id" >/dev/null 2>&1 || true
+    curl --silent --max-time 5 --request DELETE \
+      --header "Host: $authority" \
+      --header "Origin: $origin" \
+      --header "Authorization: Bearer $access_token" \
+      "$base_url/api/environments/$environment_id" >/dev/null 2>&1 || true
   fi
   if [[ -n "$server_pid" ]]; then
     kill "$server_pid" >/dev/null 2>&1 || true
+    for _ in $(seq 1 40); do
+      state=$(ps -o stat= -p "$server_pid" 2>/dev/null | tr -d ' ' || true)
+      if [[ -z "$state" || "$state" == Z* ]]; then
+        break
+      fi
+      sleep 0.25
+    done
+    state=$(ps -o stat= -p "$server_pid" 2>/dev/null | tr -d ' ' || true)
+    if [[ -n "$state" && "$state" != Z* ]]; then
+      kill -KILL "$server_pid" >/dev/null 2>&1 || true
+    fi
     wait "$server_pid" >/dev/null 2>&1 || true
   fi
   rm -f "$server_log" "$snapshot_file"
@@ -27,7 +45,8 @@ CLANNON_BIND="$bind_address" target/debug/clannon >"$server_log" 2>&1 &
 server_pid=$!
 
 for _ in $(seq 1 120); do
-  if curl --silent --fail "$base_url/" >/dev/null; then
+  private_url=$(sed -n 's/^Clannon is ready at //p' "$server_log" | tail -n 1)
+  if [[ -n "$private_url" ]]; then
     break
   fi
   if ! kill -0 "$server_pid" 2>/dev/null; then
@@ -36,18 +55,60 @@ for _ in $(seq 1 120); do
   fi
   sleep 0.25
 done
-curl --silent --fail "$base_url/" >/dev/null
+if [[ -z "${private_url:-}" ]]; then
+  cat "$server_log" >&2
+  exit 1
+fi
 
-if ! create_response=$(curl --silent --show-error --fail-with-body --request POST "$base_url/api/environments"); then
+base_url=${private_url%%/#*}
+origin=$base_url
+authority=${origin#http://}
+access_token=${private_url##*#}
+if [[ ! "$access_token" =~ ^[0-9a-f]{64}$ ]]; then
+  printf 'invalid private URL in server output: %s\n' "$private_url" >&2
+  exit 1
+fi
+
+curl --silent --fail --header "Host: $authority" "$base_url/" >/dev/null
+
+status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --request POST \
+  --header 'Host: attacker.example' \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/environments")
+[[ "$status" == "421" ]]
+
+status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --request POST \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  "$base_url/api/environments")
+[[ "$status" == "401" ]]
+
+status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --request POST \
+  --header "Host: $authority" \
+  --header 'Origin: http://evil.example' \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/environments")
+[[ "$status" == "403" ]]
+
+if ! create_response=$(curl --silent --show-error --fail-with-body \
+  --request POST \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/environments"); then
   printf '%s\n' "$create_response" >&2
   cat "$server_log" >&2
   exit 1
 fi
 environment_id=$(node -e 'const d=JSON.parse(process.argv[1]); if(!d.id) process.exit(1); process.stdout.write(d.id)' "$create_response")
 
-BASE_URL="$base_url" ENVIRONMENT_ID="$environment_id" node <<'NODE'
+BASE_URL="$base_url" ACCESS_TOKEN="$access_token" ENVIRONMENT_ID="$environment_id" node <<'NODE'
 const wsUrl = process.env.BASE_URL.replace(/^http/, "ws") +
-  `/api/environments/${process.env.ENVIRONMENT_ID}/terminal`;
+  `/api/environments/${process.env.ENVIRONMENT_ID}/terminal?access_token=${encodeURIComponent(process.env.ACCESS_TOKEN)}`;
 const protocol = "clannon.terminal.v1";
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -179,7 +240,11 @@ async function openTerminal(expectedResumed) {
 });
 NODE
 
-curl --silent --fail "$base_url/api/environments/$environment_id/observations" >"$snapshot_file"
+curl --silent --fail \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/environments/$environment_id/observations" >"$snapshot_file"
 node - "$snapshot_file" <<'NODE'
 const fs = require("node:fs");
 const snapshot = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -217,8 +282,16 @@ if (!hasProofFile || !hasCommand || !hasDetachedOutput || !hasResumeProof || !ha
 }
 NODE
 
-curl --silent --fail --max-time 5 --request DELETE "$base_url/api/environments/$environment_id" >/dev/null
-status=$(curl --silent --output /dev/null --write-out '%{http_code}' "$base_url/api/environments/$environment_id/observations")
+curl --silent --fail --max-time 5 --request DELETE \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/environments/$environment_id" >/dev/null
+status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/environments/$environment_id/observations")
 [[ "$status" == "404" ]]
 environment_id=""
 

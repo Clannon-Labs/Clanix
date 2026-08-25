@@ -56,6 +56,8 @@ Read `PROJECT.md` before changing product behavior.
 - `crates/runtime/`: transport-neutral environment lifecycle, terminal
   sessions, observations, and the private rootless Podman command boundary.
 - `static/`: dependency-free browser UI.
+- `tests/frontend-terminal.test.cjs`: dependency-free browser command-input
+  regression proof.
 - `tests/smoke.sh`: opt-in real Podman lifecycle proof.
 - `scripts/crew.sh`: Codex-only scoped expert dispatcher; workflow in
   `scripts/README.md`.
@@ -69,6 +71,7 @@ Read `PROJECT.md` before changing product behavior.
 ```sh
 cargo run
 cargo test --workspace
+node --test tests/frontend-terminal.test.cjs
 ```
 
 The server binds to `127.0.0.1:3000` by default. `CLANNON_BIND` and

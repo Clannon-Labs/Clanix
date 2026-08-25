@@ -18,7 +18,7 @@ pub(crate) async fn session(socket: WebSocket, reservation: TerminalReservation)
 
     let (mut sender, mut receiver) = socket.split();
     let _ = sender
-        .send(Message::Text("Clannon environment ready.\n$ ".into()))
+        .send(Message::Text("Clannon environment ready.\n".into()))
         .await;
 
     loop {

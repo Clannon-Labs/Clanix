@@ -7,6 +7,7 @@ const elements = {
   run: document.querySelector("#terminal-form button[type='submit']"),
   reconnect: document.querySelector("#reconnect"),
   output: document.querySelector("#terminal-output"),
+  commandPrompt: document.querySelector("#command-prompt"),
   environmentId: document.querySelector("#environment-id"),
   terminalStatus: document.querySelector("#terminal-status"),
   stateDot: document.querySelector("#state-dot"),
@@ -24,6 +25,8 @@ elements.create.addEventListener("click", createEnvironment);
 elements.destroy.addEventListener("click", destroyEnvironment);
 elements.refresh.addEventListener("click", refreshObservations);
 elements.form.addEventListener("submit", runCommand);
+elements.command.addEventListener("keydown", handleCommandKeydown);
+elements.command.addEventListener("input", updateCommandComposer);
 elements.reconnect.addEventListener("click", () => connectTerminal(false));
 window.addEventListener("beforeunload", () => socket?.close());
 
@@ -89,15 +92,59 @@ function runCommand(event) {
   event.preventDefault();
   const command = elements.command.value;
   if (!command) return;
+  if (lineEndsWithContinuation(command, command.length)) {
+    elements.command.value += "\n";
+    elements.command.selectionStart = elements.command.value.length;
+    updateCommandComposer();
+    elements.command.focus();
+    return;
+  }
   if (socket?.readyState !== WebSocket.OPEN) {
     showTerminalError("Terminal is not ready. Reconnect before running commands.");
     updateTerminalControls();
     return;
   }
-  appendOutput(`${command}\n`);
+  appendSubmittedCommand(command);
   socket.send(`${command}\n`);
   elements.command.value = "";
+  updateCommandComposer();
   window.setTimeout(refreshObservations, 350);
+}
+
+function handleCommandKeydown(event) {
+  if (event.key !== "Enter" || event.isComposing) return;
+  if (event.shiftKey || lineEndsWithContinuation(elements.command.value, elements.command.selectionStart)) {
+    window.requestAnimationFrame(updateCommandComposer);
+    return;
+  }
+  event.preventDefault();
+  elements.form.requestSubmit();
+}
+
+function lineEndsWithContinuation(command, cursor) {
+  const lineStart = command.lastIndexOf("\n", cursor - 1) + 1;
+  const trailingBackslashes = command.slice(lineStart, cursor).match(/\\+$/)?.[0].length ?? 0;
+  return trailingBackslashes % 2 === 1;
+}
+
+function updateCommandComposer() {
+  const lines = elements.command.value.split("\n");
+  const previousLine = lines.at(-2);
+  elements.commandPrompt.textContent = previousLine !== undefined
+    && lineEndsWithContinuation(previousLine, previousLine.length) ? ">" : "$";
+  elements.command.style.height = "auto";
+  elements.command.style.height = `${Math.min(elements.command.scrollHeight, 128)}px`;
+}
+
+function appendSubmittedCommand(command) {
+  const leadingNewline = elements.output.textContent && !elements.output.textContent.endsWith("\n") ? "\n" : "";
+  let continuing = false;
+  const rendered = command.split("\n").map((line, index) => {
+    const prompt = index > 0 && continuing ? ">" : "$";
+    continuing = lineEndsWithContinuation(line, line.length);
+    return `${prompt} ${line}`;
+  }).join("\n");
+  appendOutput(`${leadingNewline}${rendered}\n`);
 }
 
 async function refreshObservations() {
@@ -181,6 +228,8 @@ function resetEnvironment() {
   environmentId = null;
   socket = null;
   destroying = false;
+  elements.command.value = "";
+  updateCommandComposer();
   elements.environmentId.textContent = "waiting for environment";
   elements.stateLabel.textContent = "No environment";
   elements.stateDot.classList.remove("running");

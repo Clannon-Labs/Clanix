@@ -50,8 +50,9 @@
           </header>
           <pre id="terminal-output" class="terminal-output" tabindex="0" aria-label="Terminal output">Create an environment to open the shell.</pre>
           <form id="terminal-form" class="command-line">
-            <label for="command" aria-label="Shell command">$</label>
-            <input id="command" name="command" type="text" autocomplete="off" spellcheck="false" placeholder="printf 'hello, system\n'" disabled>
+            <label id="command-prompt" for="command" aria-label="Shell command">$</label>
+            <textarea id="command" name="command" rows="1" autocomplete="off" spellcheck="false" aria-describedby="command-help" placeholder="printf 'hello, system\n'" disabled></textarea>
+            <span id="command-help" class="visually-hidden">Press Enter to run. A trailing backslash or Shift+Enter starts a new line.</span>
             <button id="reconnect" type="button" hidden>Reconnect</button>
             <button type="submit" disabled>Run</button>
           </form>

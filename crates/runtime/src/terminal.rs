@@ -42,16 +42,9 @@ pub enum TerminalInput {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TerminalEvent {
     Output(Vec<u8>),
+    OutputGap { missed: u64 },
     Exited { code: Option<i32> },
     Failed(String),
-}
-
-pub struct TerminalOutput(Vec<u8>);
-
-impl TerminalOutput {
-    pub fn into_text(self) -> String {
-        String::from_utf8_lossy(&self.0).into_owned()
-    }
 }
 
 pub struct TerminalReservation {
@@ -61,6 +54,7 @@ pub struct TerminalReservation {
 pub struct TerminalAttachment {
     environment: Option<Arc<Environment>>,
     generation: u64,
+    resumed: bool,
     stdin: Arc<Mutex<BoxWriter>>,
     events: broadcast::Receiver<TerminalEvent>,
 }
@@ -101,6 +95,7 @@ struct ActiveTerminal {
 
 struct AttachmentParts {
     generation: u64,
+    resumed: bool,
     stdin: Arc<Mutex<BoxWriter>>,
     events: broadcast::Receiver<TerminalEvent>,
 }
@@ -127,15 +122,75 @@ struct Supervisor {
 }
 
 enum PumpMessage {
-    Output(Vec<u8>),
+    Output(OutputStream, Vec<u8>),
     ReaderFailed(String),
-    ReaderDone,
+    ReaderDone(OutputStream),
     ProcessEnded(ProcessEnd),
+}
+
+#[derive(Clone, Copy)]
+enum OutputStream {
+    Stdout,
+    Stderr,
+}
+
+#[derive(Default)]
+struct Utf8TranscriptDecoder {
+    pending: Vec<u8>,
 }
 
 enum ProcessEnd {
     Exited(Option<i32>),
     Failed(String),
+}
+
+impl Utf8TranscriptDecoder {
+    fn push(&mut self, bytes: &[u8]) -> String {
+        self.pending.extend_from_slice(bytes);
+        let mut consumed = 0;
+        let mut decoded = String::new();
+
+        loop {
+            let remaining = &self.pending[consumed..];
+            if remaining.is_empty() {
+                break;
+            }
+            match std::str::from_utf8(remaining) {
+                Ok(valid) => {
+                    decoded.push_str(valid);
+                    consumed = self.pending.len();
+                    break;
+                }
+                Err(error) => {
+                    let valid_end = error.valid_up_to();
+                    if valid_end > 0 {
+                        decoded.push_str(
+                            std::str::from_utf8(&remaining[..valid_end])
+                                .expect("UTF-8 validator identified a valid prefix"),
+                        );
+                        consumed += valid_end;
+                    }
+                    let Some(invalid_length) = error.error_len() else {
+                        break;
+                    };
+                    decoded.push(char::REPLACEMENT_CHARACTER);
+                    consumed += invalid_length;
+                }
+            }
+        }
+
+        self.pending.drain(..consumed);
+        decoded
+    }
+
+    fn finish(&mut self) -> String {
+        let mut decoded = self.push(&[]);
+        if !self.pending.is_empty() {
+            decoded.push(char::REPLACEMENT_CHARACTER);
+            self.pending.clear();
+        }
+        decoded
+    }
 }
 
 pub(crate) fn reserve(environment: Arc<Environment>) -> Result<TerminalReservation, RuntimeError> {
@@ -179,6 +234,7 @@ impl TerminalReservation {
         Ok(TerminalAttachment {
             environment: Some(environment),
             generation: parts.generation,
+            resumed: parts.resumed,
             stdin: parts.stdin,
             events: parts.events,
         })
@@ -194,6 +250,10 @@ impl Drop for TerminalReservation {
 }
 
 impl TerminalAttachment {
+    pub fn resumed(&self) -> bool {
+        self.resumed
+    }
+
     pub async fn send(&mut self, input: TerminalInput) -> io::Result<()> {
         let environment = self
             .environment
@@ -218,17 +278,10 @@ impl TerminalAttachment {
     pub async fn next_event(&mut self) -> Option<TerminalEvent> {
         match self.events.recv().await {
             Ok(event) => Some(event),
-            Err(broadcast::error::RecvError::Lagged(count)) => Some(TerminalEvent::Failed(
-                format!("terminal attachment lagged and missed {count} events"),
-            )),
+            Err(broadcast::error::RecvError::Lagged(missed)) => {
+                Some(TerminalEvent::OutputGap { missed })
+            }
             Err(broadcast::error::RecvError::Closed) => None,
-        }
-    }
-
-    pub async fn next_output(&mut self) -> Option<TerminalOutput> {
-        match self.next_event().await? {
-            TerminalEvent::Output(bytes) => Some(TerminalOutput(bytes)),
-            TerminalEvent::Exited { .. } | TerminalEvent::Failed(_) => None,
         }
     }
 
@@ -275,6 +328,7 @@ impl TerminalHub {
         {
             return Ok(AttachmentParts {
                 generation: active.generation,
+                resumed: true,
                 stdin: active.stdin.clone(),
                 events: active.events.subscribe(),
             });
@@ -324,6 +378,7 @@ impl TerminalHub {
 
         Ok(AttachmentParts {
             generation,
+            resumed: false,
             stdin,
             events: event_receiver,
         })
@@ -422,8 +477,8 @@ async fn supervise(supervisor: Supervisor, process: SupervisedProcess) {
         stop_receiver,
     } = process;
     let (pump, mut messages) = mpsc::channel(PUMP_CAPACITY);
-    let stdout_reader = tokio::spawn(read_output("stdout", stdout, pump.clone()));
-    let stderr_reader = tokio::spawn(read_output("stderr", stderr, pump.clone()));
+    let stdout_reader = tokio::spawn(read_output(OutputStream::Stdout, stdout, pump.clone()));
+    let stderr_reader = tokio::spawn(read_output(OutputStream::Stderr, stderr, pump.clone()));
     let process_waiter = tokio::spawn(async move {
         let end = wait(stop_receiver).await;
         let _ = pump.send(PumpMessage::ProcessEnded(end)).await;
@@ -433,6 +488,8 @@ async fn supervise(supervisor: Supervisor, process: SupervisedProcess) {
     let mut process_end = None;
     let mut pump_failure = None;
     let mut reader_deadline = None;
+    let mut stdout_decoder = Utf8TranscriptDecoder::default();
+    let mut stderr_decoder = Utf8TranscriptDecoder::default();
     while readers_remaining > 0 || process_end.is_none() {
         let message = match reader_deadline {
             Some(deadline) => match timeout_at(deadline, messages.recv()).await {
@@ -446,11 +503,16 @@ async fn supervise(supervisor: Supervisor, process: SupervisedProcess) {
             break;
         };
         match message {
-            PumpMessage::Output(bytes) => {
+            PumpMessage::Output(stream, bytes) => {
+                let decoder = match stream {
+                    OutputStream::Stdout => &mut stdout_decoder,
+                    OutputStream::Stderr => &mut stderr_decoder,
+                };
+                let transcript = decoder.push(&bytes);
                 if let Some(hub) = hub.upgrade() {
-                    hub.transcript
-                        .record("output", String::from_utf8_lossy(&bytes).into_owned())
-                        .await;
+                    if !transcript.is_empty() {
+                        hub.transcript.record("output", transcript).await;
+                    }
                 }
                 let _ = events.send(TerminalEvent::Output(bytes));
             }
@@ -460,7 +522,18 @@ async fn supervise(supervisor: Supervisor, process: SupervisedProcess) {
                     hub.request_stop(generation, message);
                 }
             }
-            PumpMessage::ReaderDone => readers_remaining -= 1,
+            PumpMessage::ReaderDone(stream) => {
+                let transcript = match stream {
+                    OutputStream::Stdout => stdout_decoder.finish(),
+                    OutputStream::Stderr => stderr_decoder.finish(),
+                };
+                if let Some(hub) = hub.upgrade()
+                    && !transcript.is_empty()
+                {
+                    hub.transcript.record("output", transcript).await;
+                }
+                readers_remaining -= 1;
+            }
             PumpMessage::ProcessEnded(end) => {
                 process_end = Some(end);
                 reader_deadline = Some(Instant::now() + READER_DRAIN_GRACE);
@@ -478,6 +551,14 @@ async fn supervise(supervisor: Supervisor, process: SupervisedProcess) {
         process_waiter.abort();
     }
     let _ = process_waiter.await;
+
+    for transcript in [stdout_decoder.finish(), stderr_decoder.finish()] {
+        if let Some(hub) = hub.upgrade()
+            && !transcript.is_empty()
+        {
+            hub.transcript.record("output", transcript).await;
+        }
+    }
 
     let final_event = match (pump_failure, process_end) {
         (Some(message), _) => TerminalEvent::Failed(message),
@@ -499,14 +580,18 @@ async fn supervise(supervisor: Supervisor, process: SupervisedProcess) {
     }
 }
 
-async fn read_output(stream: &str, mut reader: BoxReader, sender: mpsc::Sender<PumpMessage>) {
+async fn read_output(
+    stream: OutputStream,
+    mut reader: BoxReader,
+    sender: mpsc::Sender<PumpMessage>,
+) {
     let mut buffer = [0_u8; 4096];
     loop {
         match reader.read(&mut buffer).await {
             Ok(0) => break,
             Ok(count) => {
                 if sender
-                    .send(PumpMessage::Output(buffer[..count].to_vec()))
+                    .send(PumpMessage::Output(stream, buffer[..count].to_vec()))
                     .await
                     .is_err()
                 {
@@ -516,7 +601,11 @@ async fn read_output(stream: &str, mut reader: BoxReader, sender: mpsc::Sender<P
             Err(error) => {
                 if sender
                     .send(PumpMessage::ReaderFailed(format!(
-                        "could not read terminal {stream}: {error}"
+                        "could not read terminal {}: {error}",
+                        match stream {
+                            OutputStream::Stdout => "stdout",
+                            OutputStream::Stderr => "stderr",
+                        }
                     )))
                     .await
                     .is_err()
@@ -527,7 +616,7 @@ async fn read_output(stream: &str, mut reader: BoxReader, sender: mpsc::Sender<P
             }
         }
     }
-    let _ = sender.send(PumpMessage::ReaderDone).await;
+    let _ = sender.send(PumpMessage::ReaderDone(stream)).await;
 }
 
 async fn wait_for_child(mut child: Child, mut stop: mpsc::Receiver<String>) -> ProcessEnd {
@@ -652,6 +741,7 @@ mod tests {
         let (process, mut input, mut output) = running_process();
         let mut reservation = reserve(environment.clone()).unwrap();
         let mut attachment = reservation.open_with(|_| Ok(process)).unwrap();
+        assert!(!attachment.resumed());
 
         output.write_all(&[0xff, b'a']).await.unwrap();
         assert_eq!(
@@ -676,6 +766,7 @@ mod tests {
                 panic!("a reconnect must not spawn a second terminal")
             })
             .unwrap();
+        assert!(attachment.resumed());
         assert!(
             timeout(Duration::from_millis(20), attachment.next_event())
                 .await
@@ -712,7 +803,7 @@ mod tests {
             let end = match &expected {
                 TerminalEvent::Exited { code } => ProcessEnd::Exited(*code),
                 TerminalEvent::Failed(message) => ProcessEnd::Failed(message.clone()),
-                TerminalEvent::Output(_) => unreachable!(),
+                TerminalEvent::Output(_) | TerminalEvent::OutputGap { .. } => unreachable!(),
             };
             let mut reservation = reserve(environment.clone()).unwrap();
             let mut attachment = reservation.open_with(|_| Ok(ended_process(end))).unwrap();
@@ -755,8 +846,19 @@ mod tests {
         }
         assert!(matches!(
             attachment.next_event().await,
-            Some(TerminalEvent::Failed(message)) if message.contains("missed 1 events")
+            Some(TerminalEvent::OutputGap { missed: 1 })
         ));
+    }
+
+    #[test]
+    fn transcript_decoder_preserves_split_utf8_and_marks_invalid_bytes() {
+        let mut decoder = Utf8TranscriptDecoder::default();
+        assert_eq!(decoder.push(&[0xe2, 0x82]), "");
+        assert_eq!(decoder.push(&[0xac, b'\n']), "€\n");
+        assert_eq!(decoder.push(&[0xff, b'a']), "�a");
+        assert_eq!(decoder.push(&[0xf0, 0x9f]), "");
+        assert_eq!(decoder.finish(), "�");
+        assert_eq!(decoder.finish(), "");
     }
 
     #[tokio::test]
@@ -837,7 +939,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_input_is_not_recorded_as_terminal_evidence() {
+    async fn failed_input_is_not_recorded_and_emits_authoritative_failure() {
         let environment = environment();
         let (process_stdin, closed_peer) = tokio::io::duplex(64);
         drop(closed_peer);
@@ -854,15 +956,26 @@ mod tests {
         let mut reservation = reserve(environment.clone()).unwrap();
         let mut attachment = reservation.open_with(|_| Ok(process)).unwrap();
 
-        assert!(
-            attachment
-                .send(TerminalInput::Text("never executed\n".into()))
-                .await
-                .is_err()
-        );
+        let write_error = attachment
+            .send(TerminalInput::Text("never executed\n".into()))
+            .await
+            .expect_err("the closed stdin peer must reject terminal input");
         assert!(environment.transcript_snapshot().await.is_empty());
+        assert_eq!(
+            timeout(Duration::from_secs(1), attachment.next_event())
+                .await
+                .expect("a failed input write must produce a terminal ending"),
+            Some(TerminalEvent::Failed(format!(
+                "could not write terminal input: {write_error}"
+            )))
+        );
         drop(attachment);
-        environment.terminal().stop_and_reap().await;
+        timeout(
+            Duration::from_secs(1),
+            environment.terminal().wait_for_processes(),
+        )
+        .await
+        .expect("the failed terminal proxy must be reaped");
     }
 
     async fn wait_for_transcript(environment: &Environment, length: usize) {

@@ -83,6 +83,21 @@ async fn terminal(
     State(state): State<Runtime>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
+    let requested_protocols: Vec<_> = websocket
+        .requested_protocols()
+        .filter_map(|value| value.to_str().ok())
+        .collect();
+    if !terminal::supports_protocol(&requested_protocols) {
+        return Ok((
+            StatusCode::BAD_REQUEST,
+            "unsupported terminal WebSocket subprotocol",
+        )
+            .into_response());
+    }
     let reservation = state.reserve_terminal(&id).await?;
+    let websocket = websocket
+        .max_message_size(terminal::MAX_WEBSOCKET_MESSAGE_BYTES)
+        .max_frame_size(terminal::MAX_WEBSOCKET_MESSAGE_BYTES)
+        .protocols([terminal::SUBPROTOCOL]);
     Ok(websocket.on_upgrade(move |socket| terminal::session(socket, reservation)))
 }

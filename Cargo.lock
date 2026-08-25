@@ -566,6 +566,7 @@ dependencies = [
  "futures-util",
  "runtime",
  "serde",
+ "serde_json",
  "tokio",
 ]
 

@@ -11,6 +11,7 @@ const elements = {
   commandPrompt: document.querySelector("#command-prompt"),
   environmentId: document.querySelector("#environment-id"),
   terminalStatus: document.querySelector("#terminal-status"),
+  terminalAnnouncement: document.querySelector("#terminal-announcement"),
   stateDot: document.querySelector("#state-dot"),
   stateLabel: document.querySelector("#state-label"),
   warnings: document.querySelector("#warnings"),
@@ -19,6 +20,10 @@ const elements = {
 
 const MAX_TERMINAL_OUTPUT_CHARACTERS = 200 * 1024;
 const TERMINAL_OMISSION_MARKER = "[earlier terminal output omitted]\n";
+const TERMINAL_PROTOCOL = "clannon.terminal.v1";
+const TERMINAL_VERSION = 1;
+const MAX_TERMINAL_INPUT_BYTES = 64 * 1024;
+const PROTOCOL_ERROR_RECOVERY = "Destroy this environment before reloading the page.";
 
 let environmentId = null;
 let socket = null;
@@ -33,7 +38,7 @@ elements.refresh.addEventListener("click", refreshObservations);
 elements.form.addEventListener("submit", runCommand);
 elements.command.addEventListener("keydown", handleCommandKeydown);
 elements.command.addEventListener("input", updateCommandComposer);
-elements.reconnect.addEventListener("click", () => connectTerminal(false));
+elements.reconnect.addEventListener("click", handleReconnect);
 window.addEventListener("beforeunload", () => socket?.close());
 
 function readThemePreference() {
@@ -84,37 +89,187 @@ function connectTerminal(clearOutput) {
   if (!environmentId || socket?.readyState === WebSocket.CONNECTING || socket?.readyState === WebSocket.OPEN) return;
 
   const id = environmentId;
+  const openingAfterEnd = terminalState === "ended";
   const protocol = location.protocol === "https:" ? "wss" : "ws";
-  const terminalSocket = new WebSocket(`${protocol}://${location.host}/api/environments/${id}/terminal`);
+  const terminalSocket = new WebSocket(
+    `${protocol}://${location.host}/api/environments/${id}/terminal`,
+    TERMINAL_PROTOCOL,
+  );
+  terminalSocket.binaryType = "arraybuffer";
   socket = terminalSocket;
-  setTerminalState("connecting");
+  const decoder = new TextDecoder();
+  let decoderFlushed = false;
+  const reconnecting = !clearOutput;
+  setTerminalState(
+    reconnecting ? "reconnecting" : "connecting",
+    `${reconnecting ? "Reconnecting" : "Connecting"} to the environment shell. Run remains unavailable until the shell is ready.`,
+  );
+
+  const flushDecoder = (appendTail = true) => {
+    if (decoderFlushed) return;
+    decoderFlushed = true;
+    const tail = decoder.decode();
+    if (tail && appendTail) appendOutput(tail);
+  };
+
+  const protocolError = (message) => {
+    if (!isCurrentSocket(terminalSocket, id)) return;
+    flushDecoder();
+    showTerminalError(`Terminal protocol error: ${message} ${PROTOCOL_ERROR_RECOVERY}`);
+    setTerminalState("protocol-error", `Terminal protocol error. ${message} ${PROTOCOL_ERROR_RECOVERY}`);
+    terminalSocket.close(1002, "terminal protocol error");
+  };
 
   terminalSocket.addEventListener("open", () => {
     if (!isCurrentSocket(terminalSocket, id)) return;
-    if (clearOutput) {
-      elements.output.textContent = "";
-    } else {
-      appendOutput("\n[terminal reconnected]\n");
+    if (terminalSocket.protocol !== TERMINAL_PROTOCOL) {
+      protocolError("the server did not negotiate clannon.terminal.v1.");
+      return;
     }
-    setTerminalState("ready");
-    elements.command.focus();
+    try {
+      terminalSocket.send(JSON.stringify({
+        type: "open",
+        version: TERMINAL_VERSION,
+        columns: 80,
+        rows: 24,
+      }));
+    } catch (error) {
+      showTerminalError(error);
+      terminalSocket.close();
+    }
   });
   terminalSocket.addEventListener("message", (event) => {
     if (!isCurrentSocket(terminalSocket, id)) return;
-    appendOutput(event.data);
+    if (typeof event.data === "string") {
+      handleTerminalControl(event.data, {
+        clearOutput,
+        flushDecoder,
+        openingAfterEnd,
+        protocolError,
+      });
+      return;
+    }
+    if (!(event.data instanceof ArrayBuffer)) {
+      protocolError("server output was not an ArrayBuffer.");
+      return;
+    }
+    if (terminalState !== "ready" || decoderFlushed) {
+      protocolError("binary output arrived outside a ready terminal session.");
+      return;
+    }
+    try {
+      const text = decoder.decode(event.data, { stream: true });
+      if (text) appendOutput(text);
+    } catch {
+      protocolError("server output could not be decoded.");
+    }
   });
   terminalSocket.addEventListener("close", () => {
-    if (!isCurrentSocket(terminalSocket, id)) return;
+    const current = isCurrentSocket(terminalSocket, id);
+    flushDecoder(current);
+    if (!current) return;
     socket = null;
-    if (environmentId) {
+    if (!environmentId) return;
+    if (["ended", "terminal-error", "protocol-error"].includes(terminalState)) {
+      updateTerminalControls();
+    } else {
       appendOutput("\n[terminal disconnected — the environment may still be inspected]\n");
-      setTerminalState("disconnected");
+      setTerminalState("disconnected", "Terminal disconnected. Your draft and visible output were preserved. Reconnect when ready.");
     }
   });
   terminalSocket.addEventListener("error", () => {
     if (!isCurrentSocket(terminalSocket, id)) return;
     showTerminalError("Could not connect the browser terminal.");
+    announceTerminal("The terminal connection reported an error. Your draft and visible output are preserved.");
   });
+}
+
+function handleTerminalControl(text, connection) {
+  let control;
+  try {
+    control = JSON.parse(text);
+  } catch {
+    connection.protocolError("server text was not a valid control message.");
+    return;
+  }
+  if (!control || Array.isArray(control) || typeof control !== "object" || typeof control.type !== "string") {
+    connection.protocolError("server text was not a valid control message.");
+    return;
+  }
+
+  if (control.type === "ready") {
+    if (!["connecting", "reconnecting"].includes(terminalState)
+      || !hasExactKeys(control, ["type", "version", "resumed", "resize"])
+      || control.version !== TERMINAL_VERSION
+      || typeof control.resumed !== "boolean"
+      || control.resize !== false) {
+      connection.protocolError("received a malformed or out-of-sequence ready control.");
+      return;
+    }
+    if (connection.clearOutput) {
+      elements.output.textContent = "Clannon environment ready.\n";
+    } else if (control.resumed) {
+      appendOutput("\n[shell preserved — recent output produced while detached may be in Transcript]\n");
+      void refreshObservations();
+    } else if (connection.openingAfterEnd) {
+      appendOutput("\n[fresh shell opened after the previous shell ended]\n");
+    } else {
+      appendOutput("\n[previous shell was unavailable — fresh shell opened]\n");
+    }
+    const announcement = control.resumed
+      ? "Terminal ready. The existing shell was preserved. Recent output produced while detached may be available in Transcript."
+      : "Terminal ready with a fresh shell.";
+    setTerminalState("ready", announcement);
+    elements.command.focus();
+    return;
+  }
+
+  if (control.type === "exit") {
+    const validCode = control.code === null
+      || (Number.isSafeInteger(control.code) && control.code >= -2_147_483_648 && control.code <= 2_147_483_647);
+    if (terminalState !== "ready" || !hasExactKeys(control, ["type", "code"]) || !validCode) {
+      connection.protocolError("received a malformed or out-of-sequence exit control.");
+      return;
+    }
+    connection.flushDecoder();
+    const code = control.code === null ? "unknown" : control.code;
+    appendOutput(`\n[shell exited with code ${code}]\n`);
+    setTerminalState("ended", `Shell exited with code ${code}. Open a new shell to continue in this environment.`);
+    return;
+  }
+
+  if (control.type === "error") {
+    if (!hasExactKeys(control, ["type", "code", "message"])
+      || !["protocol_error", "runtime_error", "output_gap"].includes(control.code)
+      || typeof control.message !== "string" || !control.message) {
+      connection.protocolError("received a malformed error control.");
+      return;
+    }
+    connection.flushDecoder();
+    const recovery = control.code === "protocol_error" ? ` ${PROTOCOL_ERROR_RECOVERY}` : "";
+    showTerminalError(`${control.code}: ${control.message}${recovery}`);
+    if (control.code === "protocol_error") {
+      setTerminalState("protocol-error", `Terminal protocol error. ${control.message} ${PROTOCOL_ERROR_RECOVERY}`);
+    } else if (control.code === "output_gap") {
+      setTerminalState("terminal-error", `Some live terminal output was missed. ${control.message} Reconnect to continue; Transcript may contain the missed output.`);
+    } else {
+      setTerminalState("ended", `The shell stopped because of a runtime error. ${control.message} Open a new shell to continue.`);
+    }
+    return;
+  }
+
+  connection.protocolError(`received unknown control type ${control.type}.`);
+}
+
+function hasExactKeys(value, expected) {
+  const keys = Object.keys(value).sort();
+  const expectedKeys = [...expected].sort();
+  return keys.length === expectedKeys.length
+    && keys.every((key, index) => key === expectedKeys[index]);
+}
+
+function handleReconnect() {
+  connectTerminal(false);
 }
 
 function runCommand(event) {
@@ -128,13 +283,26 @@ function runCommand(event) {
     elements.command.focus();
     return;
   }
-  if (socket?.readyState !== WebSocket.OPEN) {
+  if (terminalState !== "ready" || socket?.readyState !== WebSocket.OPEN) {
     showTerminalError("Terminal is not ready. Reconnect before running commands.");
     updateTerminalControls();
     return;
   }
+  const input = `${command}\n`;
+  const inputBytes = new TextEncoder().encode(input).byteLength;
+  if (inputBytes > MAX_TERMINAL_INPUT_BYTES) {
+    showTerminalError(`Command is ${inputBytes} bytes; the terminal limit is ${MAX_TERMINAL_INPUT_BYTES} bytes.`);
+    announceTerminal("The command was not sent because it exceeds the 64 KiB terminal input limit. Your draft was preserved.");
+    return;
+  }
+  try {
+    socket.send(JSON.stringify({ type: "input", data: input }));
+  } catch (error) {
+    showTerminalError(error);
+    announceTerminal("The command was not sent. Your draft was preserved so you can try again.");
+    return;
+  }
   appendSubmittedCommand(command);
-  socket.send(`${command}\n`);
   elements.command.value = "";
   updateCommandComposer();
   window.setTimeout(refreshObservations, 350);
@@ -299,7 +467,7 @@ function resetEnvironment() {
   elements.stateLabel.textContent = "No environment";
   elements.stateDot.classList.remove("running");
   updateEnvironmentControls();
-  setTerminalState("disconnected");
+  setTerminalState("disconnected", "No environment is active.");
   ["transcript", "processes", "files", "network"].forEach((id) => {
     const container = document.querySelector(`#${id}`);
     container.classList.add("empty");
@@ -321,19 +489,34 @@ function updateEnvironmentControls() {
 }
 
 function updateTerminalControls() {
-  const ready = Boolean(environmentId) && !destroying && socket?.readyState === WebSocket.OPEN;
-  elements.command.disabled = !ready;
+  const hasEnvironment = Boolean(environmentId) && !destroying;
+  const ready = hasEnvironment && terminalState === "ready" && socket?.readyState === WebSocket.OPEN;
+  elements.command.disabled = !hasEnvironment;
   elements.run.disabled = !ready;
-  const canReconnect = Boolean(environmentId) && !destroying && terminalState === "disconnected";
+  const canReconnect = hasEnvironment
+    && !socket
+    && ["disconnected", "ended", "terminal-error"].includes(terminalState);
   elements.reconnect.hidden = !canReconnect;
   elements.reconnect.disabled = !canReconnect;
+  elements.reconnect.textContent = terminalState === "ended"
+    ? "Open new shell"
+    : "Reconnect";
 }
 
-function setTerminalState(state) {
+function setTerminalState(state, announcement = "") {
   terminalState = state;
   elements.terminalStatus.dataset.state = state;
-  elements.terminalStatus.textContent = state[0].toUpperCase() + state.slice(1);
+  const labels = {
+    "protocol-error": "Protocol error",
+    "terminal-error": "Terminal error",
+  };
+  elements.terminalStatus.textContent = labels[state] ?? state[0].toUpperCase() + state.slice(1);
+  if (announcement) announceTerminal(announcement);
   updateTerminalControls();
+}
+
+function announceTerminal(message) {
+  elements.terminalAnnouncement.textContent = message;
 }
 
 function isCurrentSocket(candidate, id) {

@@ -168,8 +168,11 @@ h1 { max-width: 820px; margin: 0; font-family: var(--display); font-size: clamp(
 .container-label { max-width: 100%; color: var(--terminal-muted); font-family: var(--mono); font-size: .68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-status { display: inline-flex; align-items: center; gap: 7px; color: var(--terminal-muted); font-family: var(--mono); font-size: .62rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .terminal-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--terminal-muted); }
-.terminal-status[data-state="connecting"]::before { background: var(--state-connecting); }
+.terminal-status[data-state="connecting"]::before,
+.terminal-status[data-state="reconnecting"]::before { background: var(--state-connecting); }
 .terminal-status[data-state="ready"]::before { background: var(--sea-glass); }
+.terminal-status[data-state="terminal-error"]::before,
+.terminal-status[data-state="protocol-error"]::before { background: var(--signal); }
 .terminal-output { min-height: 440px; max-height: 560px; margin: 0; padding: 26px; overflow: auto; color: var(--terminal-ink); font-family: var(--mono); font-size: .88rem; line-height: 1.62; white-space: pre-wrap; overflow-wrap: anywhere; }
 .command-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: end; gap: 11px; padding: 14px 18px; border-top: 1px solid var(--terminal-line); background: var(--terminal-chrome); font-family: var(--mono); }
 .command-line label { color: var(--sea-glass); font-weight: 700; }

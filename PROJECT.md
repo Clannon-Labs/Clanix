@@ -41,6 +41,15 @@ does not call a model or generate explanations.
 - Unit tests cover parsing and lifecycle-independent behavior; an opt-in smoke
   test exercises Podman when the host permits it.
 
+The browser terminal negotiates `clannon.terminal.v1`, sends a validated `open`
+control before the runtime attachment opens, and becomes ready only after the
+server's structured `ready` control. The server streams terminal output as raw
+binary frames and reserves its text frames for structured ready, exit, or error
+controls. After ready, clients may send bounded structured text or raw binary
+input. A detached live shell may be reattached; recently captured output from
+the detached interval remains available subject to the transcript retention
+limit, but is not replayed into the reattached live stream.
+
 ## Architecture principles
 
 - **One process, one node, in memory.** The Rust server owns HTTP, WebSockets,

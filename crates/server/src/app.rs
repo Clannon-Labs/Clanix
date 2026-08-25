@@ -9,7 +9,7 @@ use axum::{
 };
 use serde::Serialize;
 
-use runtime::{ObservationSnapshot, Runtime};
+use runtime::{ObservationSnapshot, Runtime, SnapshotSummary};
 
 use crate::{
     access::{self, AccessPolicy},
@@ -43,6 +43,10 @@ pub(crate) fn routes(state: AppState) -> Router {
         .route("/api/access", get(access_check))
         .route("/api/environments", post(create_environment))
         .route("/api/environments/{id}", delete(destroy_environment))
+        .route("/api/environments/{id}/snapshots", post(save_snapshot))
+        .route("/api/snapshots", get(list_snapshots))
+        .route("/api/snapshots/{id}", delete(delete_snapshot))
+        .route("/api/snapshots/{id}/forks", post(fork_snapshot))
         .route("/api/environments/{id}/observations", get(observations))
         .route("/api/environments/{id}/terminal", get(terminal))
         .with_state(state)
@@ -100,6 +104,34 @@ async fn destroy_environment(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn save_snapshot(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, axum::Json<SnapshotSummary>), AppError> {
+    let snapshot = state.runtime.save_snapshot(&id).await?;
+    Ok((StatusCode::CREATED, axum::Json(snapshot)))
+}
+
+async fn list_snapshots(State(state): State<AppState>) -> axum::Json<Vec<SnapshotSummary>> {
+    axum::Json(state.runtime.list_snapshots().await)
+}
+
+async fn delete_snapshot(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    state.runtime.delete_snapshot(id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn fork_snapshot(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, axum::Json<EnvironmentCreated>), AppError> {
+    let id = state.runtime.fork_snapshot(&id).await?;
+    Ok((StatusCode::CREATED, axum::Json(EnvironmentCreated { id })))
+}
+
 async fn observations(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -135,7 +167,7 @@ async fn terminal(
 mod tests {
     use axum::{
         body::Body,
-        http::{Request, StatusCode, header},
+        http::{Method, Request, StatusCode, header},
     };
     use tower::ServiceExt;
 
@@ -266,6 +298,39 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn snapshot_routes_reach_runtime_only_after_access_checks() {
+        let authorization = format!("Bearer {TOKEN}");
+        let list = test_routes()
+            .oneshot(
+                request("/api/snapshots", Some("localhost:3000"))
+                    .header(header::AUTHORIZATION, &authorization)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(list.status(), StatusCode::OK);
+
+        for (method, uri) in [
+            (Method::POST, "/api/environments/missing/snapshots"),
+            (Method::POST, "/api/snapshots/missing/forks"),
+            (Method::DELETE, "/api/snapshots/missing"),
+        ] {
+            let response = test_routes()
+                .oneshot(
+                    request(uri, Some("localhost:3000"))
+                        .method(method)
+                        .header(header::AUTHORIZATION, &authorization)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+        }
     }
 
     #[tokio::test]

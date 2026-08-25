@@ -18,6 +18,8 @@ decisions that keep the project small live in [`PROJECT.md`](PROJECT.md).
   are continuous tracing.
 - Snapshot observations show the terminal transcript, processes, workspace files,
   and Linux TCP/UDP socket tables.
+- Session snapshots retain an immutable, bounded copy of `/workspace` and can
+  fork that copy into a fresh disposable environment after the source is gone.
 - Guest outbound networking is disabled by default; loopback listeners inside
   the disposable container continue to work and appear in evidence.
 - State is deliberately in memory; graceful shutdown attempts to clean up every
@@ -119,10 +121,32 @@ sleep 30 &
 Refresh **Evidence** once to establish the system baseline. Later refreshes show
 Activity events for process, workspace-file, and network facts that appeared,
 disappeared, or changed between successful samples, alongside the transcript and
-current snapshots. Use **Destroy** when finished.
+current snapshots.
+
+Use **Save snapshot** to retain the current `/workspace` for this server session.
+The browser deliberately keeps one active workbench: save, explicitly
+**Destroy** the active environment, then **Fork** a retained snapshot into that
+workbench. A snapshot is immutable, survives destruction of its source, and may
+be forked repeatedly until it is deleted. A fork is a normal fresh environment
+with a new ID, shell, transcript, Activity log, and observation baselines. It
+does not inherit source processes, shell variables or working directory, open
+sockets, terminal history, sampled evidence, or changes outside `/workspace`.
 
 One server owns at most four environments that are creating, live, or awaiting
-cleanup. Transcript evidence is the newest retained tail, bounded to 500 whole
+cleanup. Separately, it retains at most four workspace snapshots, at most 64 MiB
+per serialized archive and 128 MiB in aggregate. Only one snapshot capture runs
+at a time. The archive byte count includes serialization overhead and is not the
+logical size reported by tools such as `du`. Snapshots live only in server
+memory and disappear on restart.
+
+Snapshot capture copies a live `/workspace`; it is not atomic or
+application-consistent, so files being changed during the copy may represent
+different moments. Ordinary files, directories, permission modes, symbolic
+links, and hard links are restored. The configured base image and Clannon's
+normal network, process, CPU, memory, capability, and privilege restrictions
+are applied anew to every fork.
+
+Transcript evidence is the newest retained tail, bounded to 500 whole
 entries and 1 MiB of UTF-8 entry data. Activity separately keeps at most the
 newest 500 whole events and 1 MiB of estimated owned event data, and reports how
 many earlier events were omitted by either bound. Event sequence defines order;
@@ -147,6 +171,11 @@ CLANNON_BIND=127.0.0.1:4000 clannon
 CLANNON_IMAGE=docker.io/library/alpine:3.20 clannon
 ```
 
+A custom guest image remains an expert option, not a compatibility promise. It
+must provide Clannon's existing POSIX shell and observation tools and `tar` for
+workspace snapshot capture and restore. A missing required guest tool fails the
+corresponding operation; Clannon never falls back to a host command.
+
 Only numeric IPv4 or IPv6 loopback bind addresses are supported. Port `0` is
 allowed; Clannon prints the actual selected port in its private URL. API clients
 must use an allowed `Host`, an optional matching HTTP `Origin`, and
@@ -157,11 +186,11 @@ capability in its `access_token` query parameter.
 
 Clannon has no automatic updater or persistent environment migration. Stop the
 running process with Ctrl-C and wait for it to exit before replacing the binary;
-all runtime ownership and in-memory Activity/transcript evidence is disposable
-and does not survive the restart. Graceful shutdown attempts to remove the
-containers first. Download the newer exact-version archive and `SHA256SUMS`,
-verify them as above, overwrite only the installed executable, and rerun
-`clannon --version` and `clannon doctor`.
+all runtime ownership, workspace snapshots, and in-memory Activity/transcript
+evidence are disposable and do not survive the restart. Graceful shutdown
+attempts to remove the containers first. Download the newer exact-version
+archive and `SHA256SUMS`, verify them as above, overwrite only the installed
+executable, and rerun `clannon --version` and `clannon doctor`.
 
 Before 1.0, a new minor version may break the CLI, terminal protocol,
 observation JSON, or disposable runtime behavior. Read that release's notes
@@ -206,7 +235,8 @@ cargo test --workspace
 Unit tests do not require Podman. The smoke test requires working rootless user
 namespaces and exercises create, PTY sizing and resize, foreground interruption,
 reconnection, runtime-known and refresh-sampled Activity semantics, observations,
-destroy, access-gate rejection, and rejection of the destroyed ID.
+workspace save/fork fidelity and fresh-state boundaries, destroy, access-gate
+rejection, and rejection of destroyed environment and deleted snapshot IDs.
 
 ## Current boundaries
 

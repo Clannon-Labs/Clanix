@@ -9,13 +9,14 @@ use std::{
 };
 
 use tokio::{
-    io::{AsyncRead, AsyncReadExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     process::{Child, Command},
     time::{Instant, timeout, timeout_at},
 };
 
 use crate::{
     error::{RuntimeError, RuntimeErrorKind},
+    snapshot::MAX_SNAPSHOT_BYTES,
     terminal::TerminalDimensions,
 };
 
@@ -69,6 +70,13 @@ const RESIZE_POLICY: CommandPolicy = CommandPolicy::new(
     64 * 1024,
     64 * 1024,
     "terminal resize timed out",
+);
+const SNAPSHOT_RESTORE_POLICY: CommandPolicy = CommandPolicy::new(
+    Duration::from_secs(60),
+    64 * 1024,
+    64 * 1024,
+    128 * 1024,
+    "workspace snapshot restore timed out",
 );
 const TERMINAL_WRAPPER: &str = "umask 077; test -t 0 && test -t 1 && test -t 2 || exit 64; tty_path=$(tty) || exit; case \"$tty_path\" in /dev/pts/*) tty_number=${tty_path#/dev/pts/}; case \"$tty_number\" in ''|*[!0-9]*) exit 64;; esac;; *) exit 64;; esac; stty rows \"$2\" cols \"$3\" < \"$tty_path\" || exit; printf '%s\\n' \"$tty_path\" > \"$1\" || exit; exec /bin/sh";
 const MARKER_READER: &str = "attempt=0; while [ \"$attempt\" -lt 250 ]; do if test -s \"$1\"; then cat \"$1\"; exit; fi; attempt=$((attempt + 1)); sleep 0.01; done; exit 75";
@@ -135,6 +143,64 @@ pub(crate) async fn create_container(name: &str, image: &str) -> Result<(), Runt
     } else {
         Err(command_error(
             "could not create environment",
+            &output.stderr,
+        ))
+    }
+}
+
+pub(crate) async fn capture_workspace(
+    container: &str,
+    archive_limit: usize,
+) -> Result<Vec<u8>, RuntimeError> {
+    debug_assert!(archive_limit <= MAX_SNAPSHOT_BYTES);
+    let policy = CommandPolicy::new(
+        Duration::from_secs(60),
+        archive_limit,
+        64 * 1024,
+        archive_limit + 64 * 1024,
+        "workspace snapshot capture timed out",
+    );
+    let output = bounded_podman_command(capture_workspace_args(container), policy)
+        .await
+        .map_err(|error| {
+            if error.kind() == io::ErrorKind::InvalidData
+                && error.to_string().contains("command stdout exceeded")
+            {
+                RuntimeError::new(
+                    RuntimeErrorKind::Conflict,
+                    if archive_limit == MAX_SNAPSHOT_BYTES {
+                        "workspace snapshot exceeds the 64 MiB archive limit"
+                    } else {
+                        "workspace snapshot exceeds the remaining snapshot memory limit"
+                    },
+                )
+            } else {
+                RuntimeError::internal("could not capture workspace snapshot", error)
+            }
+        })?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(command_error(
+            "could not capture workspace snapshot",
+            &output.stderr,
+        ))
+    }
+}
+
+pub(crate) async fn restore_workspace(container: &str, archive: &[u8]) -> Result<(), RuntimeError> {
+    let output = bounded_podman_command_with_input(
+        restore_workspace_args(container),
+        archive,
+        SNAPSHOT_RESTORE_POLICY,
+    )
+    .await
+    .map_err(|error| RuntimeError::internal("could not restore workspace snapshot", error))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_error(
+            "could not restore workspace snapshot",
             &output.stderr,
         ))
     }
@@ -237,6 +303,32 @@ fn create_args(name: &str, image: &str) -> Vec<String> {
     .into_iter()
     .map(str::to_owned)
     .collect()
+}
+
+fn capture_workspace_args(container: &str) -> Vec<String> {
+    vec![
+        "exec".into(),
+        container.into(),
+        "tar".into(),
+        "-C".into(),
+        "/workspace".into(),
+        "-cf".into(),
+        "-".into(),
+        ".".into(),
+    ]
+}
+
+fn restore_workspace_args(container: &str) -> Vec<String> {
+    vec![
+        "exec".into(),
+        "-i".into(),
+        container.into(),
+        "tar".into(),
+        "-C".into(),
+        "/workspace".into(),
+        "-xf".into(),
+        "-".into(),
+    ]
 }
 
 fn terminal_args(container: &str, marker: &str, dimensions: TerminalDimensions) -> Vec<String> {
@@ -396,6 +488,96 @@ async fn bounded_podman_command(
     policy: CommandPolicy,
 ) -> io::Result<Output> {
     bounded_command("podman", arguments, policy).await
+}
+
+async fn bounded_podman_command_with_input(
+    arguments: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>,
+    input: &[u8],
+    policy: CommandPolicy,
+) -> io::Result<Output> {
+    bounded_command_with_input("podman", arguments, input, policy).await
+}
+
+async fn bounded_command_with_input(
+    program: &str,
+    arguments: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>,
+    input: &[u8],
+    policy: CommandPolicy,
+) -> io::Result<Output> {
+    let mut child = Command::new(program)
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("snapshot command stdin was not piped"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("snapshot command stdout was not piped"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| io::Error::other("snapshot command stderr was not piped"))?;
+    let output_used = Arc::new(AtomicUsize::new(0));
+
+    let completed = timeout(policy.timeout, async {
+        let write_input = async move {
+            stdin.write_all(input).await?;
+            stdin.shutdown().await?;
+            drop(stdin);
+            Ok::<_, io::Error>(())
+        };
+        let (status, written, stdout, stderr) = tokio::join!(
+            child.wait(),
+            write_input,
+            read_bounded(
+                stdout,
+                policy.stdout_limit,
+                "stdout",
+                policy.output_limit,
+                output_used.clone()
+            ),
+            read_bounded(
+                stderr,
+                policy.stderr_limit,
+                "stderr",
+                policy.output_limit,
+                output_used
+            )
+        );
+        let status = status?;
+        let stdout = stdout?;
+        let stderr = stderr?;
+        if status.success() {
+            written?;
+        }
+        Ok::<_, io::Error>(Output {
+            status,
+            stdout,
+            stderr,
+        })
+    })
+    .await;
+
+    match completed {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(error)) => {
+            kill_and_reap(child).await;
+            Err(error)
+        }
+        Err(_) => {
+            kill_and_reap(child).await;
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                policy.timeout_message,
+            ))
+        }
+    }
 }
 
 async fn bounded_command_until(
@@ -717,6 +899,68 @@ mod tests {
                 "151",
             ]
         );
+    }
+
+    #[test]
+    fn snapshot_argv_streams_tar_without_a_shell_or_host_path() {
+        assert_eq!(
+            capture_workspace_args("clannon-test"),
+            [
+                "exec",
+                "clannon-test",
+                "tar",
+                "-C",
+                "/workspace",
+                "-cf",
+                "-",
+                ".",
+            ]
+        );
+        assert_eq!(
+            restore_workspace_args("clannon-test"),
+            [
+                "exec",
+                "-i",
+                "clannon-test",
+                "tar",
+                "-C",
+                "/workspace",
+                "-xf",
+                "-",
+            ]
+        );
+        assert!(
+            capture_workspace_args("clannon-test")
+                .iter()
+                .all(|argument| argument != "/bin/sh")
+        );
+    }
+
+    #[tokio::test]
+    async fn bounded_input_command_streams_bytes_and_honors_deadline() {
+        let policy =
+            CommandPolicy::new(Duration::from_secs(1), 64, 64, 64, "test command timed out");
+        let output = bounded_command_with_input("/bin/sh", ["-c", "cat"], b"snapshot", policy)
+            .await
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"snapshot");
+
+        let timeout_policy = CommandPolicy::new(
+            Duration::from_millis(20),
+            64,
+            64,
+            64,
+            "test input command timed out",
+        );
+        let started = Instant::now();
+        let error =
+            bounded_command_with_input("/bin/sleep", ["30"], &vec![0; 1024 * 1024], timeout_policy)
+                .await
+                .expect_err("a command that does not read input must be stopped at the deadline");
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(error.to_string(), "test input command timed out");
+        assert!(started.elapsed() < TERMINAL_REAP_TIMEOUT * 2);
     }
 
     #[tokio::test]

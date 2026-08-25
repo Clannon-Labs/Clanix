@@ -652,6 +652,50 @@ if (!activitySemanticsAreValid || !sampledFactsAreAbsent || !hasProofFile || !ha
 }
 NODE
 
+# Save an immutable copy of /workspace while deliberately leaving unrelated
+# rootfs and process state in the source environment.
+podman exec "$container_name" sh -c '
+  rm -rf /workspace/fork-proof
+  mkdir /workspace/fork-proof
+  printf "workspace-fork-proof\n" > /workspace/fork-proof/original.txt
+  chmod 0640 /workspace/fork-proof/original.txt
+  ln /workspace/fork-proof/original.txt /workspace/fork-proof/hardlink.txt
+  ln -s original.txt /workspace/fork-proof/symlink.txt
+  printf "rootfs-must-not-copy\n" > /root/clannon-rootfs-proof.txt
+  nohup sleep 211 >/dev/null 2>&1 &
+'
+
+if ! snapshot_response=$(curl --silent --show-error --fail-with-body --max-time 75 \
+  --request POST \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/environments/$environment_id/snapshots"); then
+  printf '%s\n' "$snapshot_response" >&2
+  cat "$server_log" >&2
+  exit 1
+fi
+snapshot_id=$(node -e '
+  const value = JSON.parse(process.argv[1]);
+  if (!/^snap-[0-9a-f]{32}$/.test(value.id) ||
+      value.source_environment_id !== process.argv[2] ||
+      !Number.isSafeInteger(value.created_at_ms) || value.created_at_ms < 1 ||
+      !Number.isSafeInteger(value.archive_bytes) || value.archive_bytes < 1) process.exit(1);
+  process.stdout.write(value.id);
+' "$snapshot_response" "$environment_id")
+
+snapshot_list=$(curl --silent --show-error --fail-with-body --max-time 10 \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/snapshots")
+node -e '
+  const list = JSON.parse(process.argv[1]);
+  const saved = JSON.parse(process.argv[2]);
+  if (!Array.isArray(list) || list.length !== 1 ||
+      JSON.stringify(list[0]) !== JSON.stringify(saved)) process.exit(1);
+' "$snapshot_list" "$snapshot_response"
+
 mapfile -t proxy_pids < <(
   ps --ppid "$server_pid" -o pid=,args= | awk '$0 ~ /podman exec/ { print $1 }'
 )
@@ -704,5 +748,130 @@ if [[ "$cleanup_complete" != true ]]; then
   exit 1
 fi
 environment_id=""
+
+# The saved archive remains after its source is gone and restores only the
+# workspace into a fresh, normally hardened environment.
+if ! fork_response=$(curl --silent --show-error --fail-with-body --max-time 75 \
+  --request POST \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/snapshots/$snapshot_id/forks"); then
+  printf '%s\n' "$fork_response" >&2
+  cat "$server_log" >&2
+  exit 1
+fi
+environment_id=$(node -e '
+  const value = JSON.parse(process.argv[1]);
+  if (!/^env-[0-9a-f]{32}$/.test(value.id)) process.exit(1);
+  process.stdout.write(value.id);
+' "$fork_response")
+
+mapfile -t fork_containers < <(
+  podman ps --format '{{.Names}}' | awk -v prefix="clannon-${server_pid}-" 'index($0, prefix) == 1'
+)
+if [[ "${#fork_containers[@]}" -ne 1 ]]; then
+  printf 'expected one fork container, found %s\n' "${#fork_containers[@]}" >&2
+  podman ps --all --format '{{.Names}}' >&2
+  exit 1
+fi
+container_name=${fork_containers[0]}
+
+fork_policy=$(podman inspect --format '{{json .HostConfig}}' "$container_name")
+node -e '
+  const policy = JSON.parse(process.argv[1]);
+  const securityOpt = Array.isArray(policy.SecurityOpt) ? policy.SecurityOpt.map(String) : [];
+  if (policy.NetworkMode !== "none" || policy.Memory !== 536870912 ||
+      policy.NanoCpus !== 1000000000 || policy.PidsLimit !== 256 ||
+      policy.Privileged !== false ||
+      !securityOpt.some((value) => value.startsWith("no-new-privileges"))) process.exit(1);
+' "$fork_policy"
+fork_cap_eff=$(podman exec "$container_name" sh -c "awk '/^CapEff:/ { print \$2 }' /proc/1/status")
+[[ "$fork_cap_eff" == "0000000000000000" ]]
+
+podman exec "$container_name" sh -c '
+  test "$(cat /workspace/fork-proof/original.txt)" = workspace-fork-proof
+  test "$(stat -c %a /workspace/fork-proof/original.txt)" = 640
+  test "$(stat -c %i /workspace/fork-proof/original.txt)" = "$(stat -c %i /workspace/fork-proof/hardlink.txt)"
+  test "$(readlink /workspace/fork-proof/symlink.txt)" = original.txt
+  test ! -e /root/clannon-rootfs-proof.txt
+  ! ps -o args= | grep -Eq "(^|[[:space:]])[s]leep 211($|[[:space:]])"
+'
+
+capture_observations
+node - "$snapshot_file" <<'NODE'
+const fs = require("node:fs");
+const snapshot = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const paths = new Set(snapshot.files.map((file) => file.path));
+const copiedPaths = [
+  "/workspace/fork-proof/original.txt",
+  "/workspace/fork-proof/hardlink.txt",
+  "/workspace/fork-proof/symlink.txt",
+];
+const freshActivity = snapshot.execution_events.length === 1 &&
+  snapshot.execution_events[0].type === "environment_ready" &&
+  snapshot.execution_events[0].sequence === 1 &&
+  snapshot.execution_events_omitted === 0;
+const sourceProcessAbsent = !snapshot.processes.some((process) =>
+  /(^|\s)sleep 211($|\s)/.test(process.arguments)
+);
+if (!copiedPaths.every((path) => paths.has(path)) ||
+    snapshot.transcript.length !== 0 || !freshActivity || !sourceProcessAbsent) {
+  console.error(JSON.stringify({ copiedPaths, freshActivity, sourceProcessAbsent, snapshot }, null, 2));
+  process.exit(1);
+}
+NODE
+
+curl --silent --fail --max-time 5 --request DELETE \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/snapshots/$snapshot_id" >/dev/null
+snapshot_list=$(curl --silent --show-error --fail-with-body --max-time 10 \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/snapshots")
+[[ "$snapshot_list" == "[]" ]]
+status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 \
+  --request POST \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/snapshots/$snapshot_id/forks")
+[[ "$status" == "404" ]]
+
+curl --silent --fail --max-time 5 --request DELETE \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/environments/$environment_id" >/dev/null
+status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 \
+  --header "Host: $authority" \
+  --header "Origin: $origin" \
+  --header "Authorization: Bearer $access_token" \
+  "$base_url/api/environments/$environment_id/observations")
+[[ "$status" == "404" ]]
+
+for _ in $(seq 1 50); do
+  if ! podman container exists "$container_name" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
+if podman container exists "$container_name" >/dev/null 2>&1; then
+  printf 'fork destroy leaked container %s\n' "$container_name" >&2
+  exit 1
+fi
+environment_id=""
+
+mapfile -t leaked_containers < <(
+  podman ps --all --format '{{.Names}}' | awk -v prefix="clannon-${server_pid}-" 'index($0, prefix) == 1'
+)
+if [[ "${#leaked_containers[@]}" -ne 0 ]]; then
+  printf 'snapshot lifecycle leaked server-owned containers\n' >&2
+  printf '%s\n' "${leaked_containers[@]}" >&2
+  exit 1
+fi
 
 echo "Clannon smoke test passed"

@@ -20,6 +20,8 @@ The first vertical slice lets one local user:
 - enter commands in a browser and see their real output;
 - inspect a basic snapshot of running processes, files changed in the workspace,
   open TCP/UDP sockets, and the terminal transcript;
+- retain a bounded, immutable copy of `/workspace` for this server session and
+  fork it into a fresh disposable environment;
 - explicitly destroy the environment and its data;
 - trust that guest commands never fall back to host execution.
 
@@ -46,6 +48,17 @@ does not call a model or generate explanations.
   terminal transcript, and process, file, and network data gathered from that
   container.
 - **Destroy environment** force-removes the container. Reusing its ID fails.
+- **Save snapshot** retains an immutable archive of the environment's
+  `/workspace` only. A snapshot survives destruction of its source environment,
+  can be forked more than once, and is removed only by explicit deletion or a
+  server restart.
+- **Fork snapshot** creates a normally isolated fresh environment and restores
+  the saved workspace into it. The fork gets a new opaque ID, shell, transcript,
+  Activity log, and observation baselines; source root-filesystem changes,
+  processes, shell state, sockets, and evidence are not copied.
+- One server retains at most four snapshots, at most 64 MiB per serialized
+  archive, and at most 128 MiB across retained snapshot archives. Snapshot
+  capture is serialized so concurrent saves cannot multiply transient memory.
 - Container names are scoped to Clannon, and shutdown attempts to remove every
   container created by this server process.
 - Unit tests cover parsing and lifecycle-independent behavior; an opt-in smoke
@@ -97,8 +110,20 @@ file changes, and preserves the previous successful file baseline for a later
 comparison.
 
 Activity and transcript evidence are lost when the environment is destroyed or
-the server restarts. Environment IDs identify runtime objects, but only the
+the server restarts. Workspace snapshots remain usable after their source
+environment is destroyed but are in-memory session state and are lost on server
+restart. Environment and snapshot IDs identify runtime objects, but only the
 server capability authorizes access to them.
+
+Workspace snapshot means a guest-produced tar archive of `/workspace` streamed
+through Podman, not an environment image or a replay point. Ordinary files,
+directories, permission modes, symbolic links, and hard links are restored. Capture walks a live
+workspace and is not atomic or application-consistent: files changed during the
+copy may reflect different moments. The archive excludes changes elsewhere in
+the container and all in-memory execution state. Its reported byte size is the
+serialized archive size, not logical file usage. Capture and restore require
+`tar` inside the configured guest image and fail rather than crossing the
+container boundary when that tool is unavailable.
 
 ## Linux local-alpha release contract
 
@@ -137,7 +162,7 @@ security scope lives in `SECURITY.md`.
 ## Architecture principles
 
 - **One process, one node, in memory.** The Rust server owns HTTP, WebSockets,
-  lifecycle state, and observation collection.
+  lifecycle state, bounded workspace snapshots, and observation collection.
 - **The container is the security boundary.** Rootless Podman provides namespaces
   and disposable storage. Clannon does not execute guest commands directly.
 - **Observe through ordinary Linux interfaces.** V0 uses `ps`, filesystem
@@ -156,8 +181,8 @@ security scope lives in `SECURITY.md`.
 - Kubernetes, microservices, queues, service discovery, or distributed state.
 - Multi-user hosting, authentication, billing, domains, DNS, or cloud purchase.
 - A hardened hostile-code platform or a claim of perfect containment.
-- Persistent environments, images built from user repositories, uploads, or IDE
-  features.
+- Persistent environments or snapshots, images built from user repositories,
+  uploads, or IDE features.
 - AI explanations, agent orchestration, vector databases, or model-provider
   abstraction.
 - eBPF, syscall tracing, deterministic replay, sharing, or collaboration.
@@ -165,7 +190,7 @@ security scope lives in `SECURITY.md`.
 
 ## Near-term sequence
 
-With terminal fidelity, runtime-known events, and truthfully labeled sampled
-system changes proven locally, next consider saved/forked environments.
+After bounded session snapshots and fresh-environment forks, next improve the
+execution evidence only where a real user workflow demonstrates the need.
 Hosted-product and open-source-runtime separation should be designed from
 evidence, not in advance.

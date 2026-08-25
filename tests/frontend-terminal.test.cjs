@@ -6,9 +6,16 @@ const vm = require("node:vm");
 
 const appSource = fs.readFileSync(path.join(__dirname, "../static/app.js"), "utf8");
 const ACCESS_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const SESSION_SNAPSHOT = {
+  id: "snapshot-one",
+  source_environment_id: "env-source",
+  created_at_ms: 1_700_000_000_000,
+  archive_bytes: 4_096,
+};
 
 function createElement(textContent = "") {
   const listeners = new Map();
+  const attributes = new Map();
   return {
     classList: { add() {}, remove() {}, toggle() {} },
     dataset: {},
@@ -29,6 +36,8 @@ function createElement(textContent = "") {
       handlers.push(listener);
       listeners.set(type, handlers);
     },
+    getAttribute(name) { return attributes.get(name) ?? null; },
+    setAttribute(name, value) { attributes.set(name, String(value)); },
     async dispatch(type, event = {}) {
       const results = (listeners.get(type) ?? []).map((listener) => listener(event));
       await Promise.all(results);
@@ -63,11 +72,19 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
   let nextTimerId = 1;
   let resolveDeferredCreate;
   let resolveDeferredDestroy;
+  let resolveDeferredSaveSnapshot;
+  let resolveDeferredForkSnapshot;
   const deferredCreate = options.deferCreate
     ? new Promise((resolve) => { resolveDeferredCreate = resolve; })
     : null;
   const deferredDestroy = options.deferDestroy
     ? new Promise((resolve) => { resolveDeferredDestroy = resolve; })
+    : null;
+  const deferredSaveSnapshot = options.deferSaveSnapshot
+    ? new Promise((resolve) => { resolveDeferredSaveSnapshot = resolve; })
+    : null;
+  const deferredForkSnapshot = options.deferForkSnapshot
+    ? new Promise((resolve) => { resolveDeferredForkSnapshot = resolve; })
     : null;
   if (storedTheme !== null) storedValues.set("clannon-color-theme", storedTheme);
   if (options.storedToken !== undefined) {
@@ -169,6 +186,7 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
     warnings: [],
   };
   const observationResponses = [...(options.observationResponses ?? [])];
+  let snapshotStore = [...(options.snapshots ?? [])];
   const response = (status, body) => ({
     ok: status >= 200 && status < 300,
     status,
@@ -199,6 +217,12 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
       if (url === "/api/access") {
         return response(options.accessProbeStatus ?? 204, {});
       }
+      if (url === "/api/snapshots" && !requestOptions.method) {
+        const status = options.snapshotListStatus ?? 200;
+        return response(status, status >= 400
+          ? { error: options.snapshotListError ?? "snapshot list unavailable" }
+          : snapshotStore);
+      }
       if (url === "/api/environments" && requestOptions.method === "POST") {
         if (deferredCreate) return deferredCreate;
         const status = options.createStatus ?? 200;
@@ -208,6 +232,33 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
             ? { error: "environment capacity reached" }
             : { id: "env-test" });
         return response(status, body);
+      }
+      if (/^\/api\/environments\/[^/]+\/snapshots$/.test(url) && requestOptions.method === "POST") {
+        if (deferredSaveSnapshot) return deferredSaveSnapshot;
+        const status = options.saveSnapshotStatus ?? 201;
+        const body = options.saveSnapshotBody ?? (status >= 400
+          ? { error: "snapshot save failed" }
+          : {
+              id: "snapshot-new",
+              source_environment_id: "env-test",
+              created_at_ms: 1_700_000_000_000,
+              archive_bytes: 2_048,
+            });
+        if (status < 400) snapshotStore = [body, ...snapshotStore.filter(({ id }) => id !== body.id)];
+        return response(status, body);
+      }
+      if (/^\/api\/snapshots\/[^/]+\/forks$/.test(url) && requestOptions.method === "POST") {
+        if (deferredForkSnapshot) return deferredForkSnapshot;
+        const status = options.forkSnapshotStatus ?? 201;
+        return response(status, options.forkSnapshotBody ?? (status >= 400
+          ? { error: "fork failed" }
+          : { id: "env-fork" }));
+      }
+      if (/^\/api\/snapshots\/[^/]+$/.test(url) && requestOptions.method === "DELETE") {
+        const snapshotId = decodeURIComponent(url.split("/").at(-1));
+        const status = options.deleteSnapshotStatus ?? 204;
+        if (status < 400) snapshotStore = snapshotStore.filter(({ id }) => id !== snapshotId);
+        return response(status, status >= 400 ? { error: "snapshot delete failed" } : null);
       }
       if (url.endsWith("/observations") && observationResponses.length) {
         const next = observationResponses.shift();
@@ -266,6 +317,7 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
     ResizeObserver: MockResizeObserver,
     WebSocket: MockWebSocket,
     window: {
+      confirm() { return options.confirmDelete ?? true; },
       addEventListener(type, listener) {
         const handlers = windowListeners.get(type) ?? [];
         handlers.push(listener);
@@ -301,6 +353,7 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
   };
 
   vm.runInNewContext(appSource, context);
+  await new Promise((resolve) => setImmediate(resolve));
   if (options.create !== false) {
     await element("#create").dispatch("click");
     if ((options.createStatus ?? 200) < 400 && options.openSocket !== false) {
@@ -341,6 +394,24 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
     },
     resolveDestroy(status, body = { error: "destroy failed" }) {
       resolveDeferredDestroy?.(response(status, body));
+    },
+    resolveSaveSnapshot(status, body = { error: "snapshot save failed" }) {
+      resolveDeferredSaveSnapshot?.(response(status, body));
+    },
+    resolveForkSnapshot(status, body = { error: "fork failed" }) {
+      resolveDeferredForkSnapshot?.(response(status, body));
+    },
+    saveSnapshot: element("#save-snapshot"),
+    snapshotAnnouncement: element("#snapshot-announcement"),
+    snapshotCount: element("#snapshot-count"),
+    snapshotForkHelp: element("#snapshot-fork-help"),
+    snapshotList: element("#snapshot-list"),
+    snapshotSection: element("#snapshot-section"),
+    snapshotTitle: element("#snapshot-title"),
+    async snapshotAction(action, snapshotIndex = 0) {
+      await element("#snapshot-list").dispatch("click", {
+        target: { dataset: { snapshotAction: action, snapshotIndex: String(snapshotIndex) } },
+      });
     },
     socket: sockets[0],
     sockets,
@@ -438,6 +509,7 @@ test("keeps the workbench readable and non-operational without a capability", as
   assert.equal(terminal.sockets.length, 0);
   assert.equal(terminal.fetches.length, 0);
   assert.equal(terminal.create.disabled, true);
+  assert.equal(terminal.saveSnapshot.disabled, true);
   assert.equal(terminal.destroy.disabled, true);
   assert.equal(terminal.refresh.disabled, true);
   assert.equal(terminal.run.disabled, true);
@@ -548,6 +620,7 @@ test("a 401 clears tab access and leaves every operation safely disabled", async
   assert.equal(terminal.sockets.length, 0);
   assert.equal(terminal.sessionValues.has("clannon-access-token"), false);
   assert.equal(terminal.create.disabled, true);
+  assert.equal(terminal.saveSnapshot.disabled, true);
   assert.equal(terminal.destroy.disabled, true);
   assert.equal(terminal.refresh.disabled, true);
   assert.equal(terminal.run.disabled, true);
@@ -570,6 +643,219 @@ test("shows environment capacity conflicts without opening a terminal", async ()
   assert.equal(terminal.destroy.disabled, true);
   assert.match(terminal.output.textContent, /at most 4 environments may exist at once/);
   assert.match(terminal.announcement.textContent, /at most 4 environments may exist at once/);
+});
+
+test("renders session-only snapshot semantics and safely projects snapshot summaries", async () => {
+  const malicious = {
+    id: "snapshot-<img>\u202E\"",
+    source_environment_id: "source-<svg>\u2066",
+    created_at_ms: 1_700_000_000_000,
+    archive_bytes: 4_096,
+  };
+  const terminal = await openTerminal(null, false, null, {
+    create: false,
+    snapshots: [malicious, SESSION_SNAPSHOT],
+  });
+  const html = terminal.snapshotList.innerHTML;
+
+  assert.equal(terminal.snapshotCount.textContent, "2");
+  assert.equal(terminal.snapshotSection.getAttribute("aria-busy"), "false");
+  assert.match(html, /snapshot-&lt;img&gt;\[U\+202E\]&quot;/);
+  assert.match(html, /source-&lt;svg&gt;\[U\+2066\]/);
+  assert.doesNotMatch(html, /<img>|<svg>|\u202e|\u2066/i);
+  assert.ok(html.indexOf("snapshot-&lt;img&gt;") < html.indexOf("snapshot-one"));
+  assert.match(html, /data-snapshot-index="0"/);
+  assert.doesNotMatch(html, /data-snapshot-id/);
+
+  const page = fs.readFileSync(path.join(__dirname, "../static/index.html"), "utf8");
+  assert.match(page, /Copies <code>\/workspace<\/code> only/);
+  assert.match(page, /last until this Clannon process stops/);
+  assert.match(page, /Background writes may race/);
+  assert.match(page, /Forks start with a fresh shell and evidence/);
+});
+
+test("saves /workspace without disturbing the active terminal or evidence", async () => {
+  const terminal = await openTerminal(null, false, {
+    captured_at_ms: 1_700_000_001_000,
+    execution_events: [{ sequence: 1, timestamp_ms: 1_700_000_000_000, type: "environment_ready" }],
+    execution_events_omitted: 0,
+    files: [],
+    network: [],
+    processes: [],
+    transcript: [],
+    warnings: [],
+  }, { snapshots: [SESSION_SNAPSHOT] });
+  terminal.command.value = "unfinished draft";
+  terminal.socket.message(bytes("visible output"));
+  const outputBefore = terminal.output.textContent;
+  const evidenceBefore = terminal.executionEvents.innerHTML;
+
+  await terminal.saveSnapshot.dispatch("click");
+
+  const request = terminal.fetches.find(({ url }) => url === "/api/environments/env-test/snapshots");
+  assert.equal(request.options.method, "POST");
+  assert.equal(terminal.command.value, "unfinished draft");
+  assert.equal(terminal.output.textContent, outputBefore);
+  assert.equal(terminal.executionEvents.innerHTML, evidenceBefore);
+  assert.equal(terminal.socket.readyState, 1);
+  assert.equal(terminal.snapshotCount.textContent, "2");
+  assert.match(terminal.snapshotList.innerHTML, /snapshot-new/);
+  assert.ok(terminal.snapshotList.innerHTML.indexOf("snapshot-one") < terminal.snapshotList.innerHTML.indexOf("snapshot-new"));
+  assert.equal(terminal.snapshotAnnouncement.textContent, "Snapshot saved for this Clannon session.");
+  assert.equal(terminal.saveSnapshot.disabled, false);
+});
+
+test("exposes one accessible snapshot mutation at a time", async () => {
+  const terminal = await openTerminal(null, false, null, { deferSaveSnapshot: true });
+  const pending = terminal.saveSnapshot.dispatch("click");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(terminal.snapshotSection.getAttribute("aria-busy"), "true");
+  assert.equal(terminal.saveSnapshot.textContent, "Saving snapshot…");
+  assert.equal(terminal.saveSnapshot.disabled, true);
+  assert.equal(terminal.destroy.disabled, true);
+  assert.equal(terminal.create.disabled, true);
+  assert.equal(terminal.run.disabled, false, "a non-atomic snapshot does not claim the shell is paused");
+  assert.match(terminal.snapshotAnnouncement.textContent, /Background writes may race/);
+
+  terminal.resolveSaveSnapshot(201, {
+    id: "snapshot-busy",
+    source_environment_id: "env-test",
+    created_at_ms: 1_700_000_000_000,
+    archive_bytes: 16,
+  });
+  await pending;
+  assert.equal(terminal.snapshotSection.getAttribute("aria-busy"), "false");
+  assert.equal(terminal.saveSnapshot.textContent, "Save snapshot");
+});
+
+test("preserves the active environment and prior snapshots when saving fails", async () => {
+  const terminal = await openTerminal(null, false, null, {
+    snapshots: [SESSION_SNAPSHOT],
+    saveSnapshotStatus: 502,
+    saveSnapshotBody: { error: "archive unavailable" },
+  });
+  terminal.command.value = "draft survives";
+
+  await terminal.saveSnapshot.dispatch("click");
+
+  assert.equal(terminal.environmentId.textContent, "env-test");
+  assert.equal(terminal.command.value, "draft survives");
+  assert.equal(terminal.snapshotCount.textContent, "1");
+  assert.match(terminal.snapshotList.innerHTML, /snapshot-one/);
+  assert.match(terminal.snapshotList.innerHTML, /Snapshot could not be saved.*archive unavailable/);
+  assert.equal(terminal.destroy.disabled, false);
+});
+
+test("requires an explicit destroy before forking into the sole workbench", async () => {
+  const terminal = await openTerminal(null, false, null, { snapshots: [SESSION_SNAPSHOT] });
+
+  assert.equal(terminal.snapshotForkHelp.hidden, false);
+  assert.match(terminal.snapshotList.innerHTML, /aria-describedby="snapshot-scope snapshot-fork-help" disabled/);
+  await terminal.snapshotAction("fork");
+  assert.equal(terminal.fetches.some(({ url }) => url.endsWith("/forks")), false);
+
+  await terminal.destroy.dispatch("click");
+  assert.equal(terminal.snapshotForkHelp.hidden, true);
+  assert.doesNotMatch(terminal.snapshotList.innerHTML, /aria-label="Fork snapshot snapshot-one"[^>]* disabled/);
+  await terminal.snapshotAction("fork");
+
+  const request = terminal.fetches.find(({ url }) => url === "/api/snapshots/snapshot-one/forks");
+  assert.equal(request.options.method, "POST");
+  assert.equal(terminal.sockets.length, 2);
+  const fork = terminal.sockets[1];
+  fork.open();
+  fork.message(JSON.stringify({ type: "ready", version: 1, resumed: false, resize: true }));
+  assert.equal(terminal.environmentId.textContent, "env-fork");
+  assert.equal(terminal.snapshotCount.textContent, "1");
+  assert.match(terminal.output.textContent, /Forked from snapshot snapshot-one/);
+  assert.match(terminal.output.textContent, /\/workspace was copied; this shell and its evidence are new/);
+  assert.equal(terminal.executionCount.textContent, 0);
+  assert.equal(terminal.command.focusCount > 0, true);
+});
+
+test("prevents a pending create from racing a snapshot fork into the sole workbench", async () => {
+  const terminal = await openTerminal(null, false, null, {
+    create: false,
+    deferCreate: true,
+    snapshots: [SESSION_SNAPSHOT],
+  });
+
+  const pendingCreate = terminal.create.dispatch("click");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(terminal.create.disabled, true);
+  assert.match(
+    terminal.snapshotList.innerHTML,
+    /aria-label="Fork snapshot snapshot-one"[^>]* disabled/,
+  );
+  await terminal.snapshotAction("fork");
+  assert.equal(terminal.fetches.some(({ url }) => url.endsWith("/forks")), false);
+
+  terminal.resolveCreate(200, { id: "env-created" });
+  await pendingCreate;
+  assert.equal(terminal.environmentId.textContent, "env-created");
+  assert.equal(terminal.sockets.length, 1);
+});
+
+test("keeps a snapshot available after capacity and missing-snapshot fork failures", async () => {
+  const capacity = await openTerminal(null, false, null, {
+    create: false,
+    snapshots: [SESSION_SNAPSHOT],
+    forkSnapshotStatus: 409,
+  });
+  await capacity.snapshotAction("fork");
+  assert.equal(capacity.sockets.length, 0);
+  assert.equal(capacity.snapshotCount.textContent, "1");
+  assert.match(capacity.snapshotList.innerHTML, /Clannon already has 4 environments\. Destroy one before forking\./);
+
+  const missing = await openTerminal(null, false, null, {
+    create: false,
+    snapshots: [SESSION_SNAPSHOT],
+    forkSnapshotStatus: 404,
+  });
+  await missing.snapshotAction("fork");
+  assert.equal(missing.sockets.length, 0);
+  assert.equal(missing.snapshotCount.textContent, "1");
+  assert.match(missing.snapshotList.innerHTML, /This snapshot is no longer available\./);
+});
+
+test("deletes only the selected session snapshot and restores accessible focus", async () => {
+  const terminal = await openTerminal(null, false, null, {
+    create: false,
+    snapshots: [SESSION_SNAPSHOT],
+  });
+
+  await terminal.snapshotAction("delete");
+
+  const request = terminal.fetches.find(({ url }) => url === "/api/snapshots/snapshot-one");
+  assert.equal(request.options.method, "DELETE");
+  assert.equal(terminal.snapshotCount.textContent, "0");
+  assert.match(terminal.snapshotList.innerHTML, /No snapshots in this Clannon session/);
+  assert.equal(terminal.snapshotTitle.focusCount, 1);
+  assert.match(terminal.snapshotAnnouncement.textContent, /Existing forks are unaffected/);
+});
+
+test("ignores a deferred snapshot response after private access changes", async () => {
+  const replacement = "d".repeat(64);
+  const terminal = await openTerminal(null, false, null, { deferSaveSnapshot: true });
+  const pendingSave = terminal.saveSnapshot.dispatch("click");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  terminal.location.hash = `#${replacement}`;
+  await terminal.dispatchWindow("hashchange");
+  terminal.resolveSaveSnapshot(201, {
+    id: "snapshot-stale",
+    source_environment_id: "env-test",
+    created_at_ms: 1_700_000_000_000,
+    archive_bytes: 1,
+  });
+  await pendingSave;
+
+  assert.equal(terminal.environmentId.textContent, "waiting for environment");
+  assert.equal(terminal.snapshotCount.textContent, "0");
+  assert.doesNotMatch(terminal.snapshotList.innerHTML, /snapshot-stale/);
+  assert.equal(terminal.sessionValues.get("clannon-access-token"), replacement);
 });
 
 test("locks a stale tab when its terminal upgrade and authenticated access probe are rejected", async () => {

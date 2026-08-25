@@ -19,6 +19,9 @@ use crate::{
     error::{RuntimeError, RuntimeErrorKind},
     observation::{self, ObservationSnapshot},
     podman,
+    snapshot::{
+        MAX_RETAINED_SNAPSHOT_BYTES, MAX_SNAPSHOT_BYTES, MAX_SNAPSHOTS, Snapshot, SnapshotSummary,
+    },
     terminal::{self, TerminalReservation},
 };
 
@@ -35,6 +38,11 @@ struct StateInner {
     environments: Mutex<HashMap<String, Arc<Environment>>>,
     environment_slots: Arc<Semaphore>,
     issued_environment_ids: StdMutex<HashSet<String>>,
+    snapshots: Mutex<HashMap<String, Arc<Snapshot>>>,
+    snapshot_slots: Arc<Semaphore>,
+    snapshot_bytes: Arc<Semaphore>,
+    snapshot_capture: Arc<Semaphore>,
+    issued_snapshot_ids: StdMutex<HashSet<String>>,
     lifecycles: StdMutex<LifecycleState>,
     cleanup_started: AtomicBool,
     cleanup_finished: AtomicBool,
@@ -58,6 +66,20 @@ struct PendingCreate {
 
 struct CreatedEnvironment {
     id: String,
+    acknowledgement: oneshot::Sender<()>,
+}
+
+struct PendingSnapshot {
+    id: String,
+    source_environment_id: String,
+    source_container_name: String,
+    slot: OwnedSemaphorePermit,
+    byte_reservation: OwnedSemaphorePermit,
+    capture_gate: OwnedSemaphorePermit,
+}
+
+struct CreatedSnapshot {
+    summary: SnapshotSummary,
     acknowledgement: oneshot::Sender<()>,
 }
 
@@ -91,6 +113,11 @@ impl Runtime {
                 environments: Mutex::new(HashMap::new()),
                 environment_slots: Arc::new(Semaphore::new(MAX_ENVIRONMENTS)),
                 issued_environment_ids: StdMutex::new(HashSet::new()),
+                snapshots: Mutex::new(HashMap::new()),
+                snapshot_slots: Arc::new(Semaphore::new(MAX_SNAPSHOTS)),
+                snapshot_bytes: Arc::new(Semaphore::new(MAX_RETAINED_SNAPSHOT_BYTES)),
+                snapshot_capture: Arc::new(Semaphore::new(1)),
+                issued_snapshot_ids: StdMutex::new(HashSet::new()),
                 lifecycles: StdMutex::new(LifecycleState {
                     accepting: true,
                     tasks: Vec::new(),
@@ -113,6 +140,213 @@ impl Runtime {
         self.create_with(
             |container, image| async move { podman::create_container(&container, &image).await },
             |container| async move { podman::remove_container(&container).await },
+        )
+        .await
+    }
+
+    pub async fn save_snapshot(
+        &self,
+        environment_id: &str,
+    ) -> Result<SnapshotSummary, RuntimeError> {
+        self.save_snapshot_with(environment_id, |container, archive_limit| async move {
+            podman::capture_workspace(&container, archive_limit).await
+        })
+        .await
+    }
+
+    async fn save_snapshot_with<Capture, CaptureFuture>(
+        &self,
+        environment_id: &str,
+        capture_workspace: Capture,
+    ) -> Result<SnapshotSummary, RuntimeError>
+    where
+        Capture: FnOnce(String, usize) -> CaptureFuture + Send + 'static,
+        CaptureFuture: Future<Output = Result<Vec<u8>, RuntimeError>> + Send + 'static,
+    {
+        let source = self.find(environment_id).await?;
+        let slot = self
+            .inner
+            .snapshot_slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorKind::Conflict,
+                    format!("at most {MAX_SNAPSHOTS} snapshots may exist at once"),
+                )
+            })?;
+        let capture_gate = self
+            .inner
+            .snapshot_capture
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorKind::Internal,
+                    "snapshot capture gate closed unexpectedly",
+                )
+            })?;
+        let archive_limit = self
+            .inner
+            .snapshot_bytes
+            .available_permits()
+            .min(MAX_SNAPSHOT_BYTES);
+        if archive_limit == 0 {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::Conflict,
+                "snapshot memory limit is currently exhausted",
+            ));
+        }
+        let byte_reservation = self
+            .inner
+            .snapshot_bytes
+            .clone()
+            .try_acquire_many_owned(archive_limit as u32)
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorKind::Conflict,
+                    "snapshot memory limit is currently exhausted",
+                )
+            })?;
+        let id = self.allocate_snapshot_id()?;
+        let pending = PendingSnapshot {
+            id,
+            source_environment_id: environment_id.to_owned(),
+            source_container_name: source.container_name().to_owned(),
+            slot,
+            byte_reservation,
+            capture_gate,
+        };
+        let inner = self.inner.clone();
+        let (result_sender, result_receiver) = oneshot::channel();
+
+        {
+            let mut lifecycles = self
+                .inner
+                .lifecycles
+                .lock()
+                .expect("lifecycle task lock poisoned");
+            if !lifecycles.accepting {
+                release_snapshot_id(&self.inner, &pending.id);
+                return Err(RuntimeError::new(
+                    RuntimeErrorKind::Conflict,
+                    "snapshot creation is unavailable during cleanup",
+                ));
+            }
+            lifecycles.tasks.retain(|task| !task.is_finished());
+            lifecycles.tasks.push(tokio::spawn(async move {
+                finish_save_snapshot(inner, pending, result_sender, capture_workspace).await;
+            }));
+        }
+
+        match result_receiver.await {
+            Ok(Ok(created)) => {
+                let CreatedSnapshot {
+                    summary,
+                    acknowledgement,
+                } = created;
+                let _ = acknowledgement.send(());
+                Ok(summary)
+            }
+            Ok(Err(error)) => Err(error),
+            Err(_) => Err(RuntimeError::new(
+                RuntimeErrorKind::Internal,
+                "snapshot creation task ended unexpectedly",
+            )),
+        }
+    }
+
+    pub async fn list_snapshots(&self) -> Vec<SnapshotSummary> {
+        let mut snapshots: Vec<_> = self
+            .inner
+            .snapshots
+            .lock()
+            .await
+            .values()
+            .map(|snapshot| snapshot.summary())
+            .collect();
+        snapshots.sort_by(|left, right| {
+            left.created_at_ms
+                .cmp(&right.created_at_ms)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        snapshots
+    }
+
+    pub async fn delete_snapshot(&self, snapshot_id: String) -> Result<(), RuntimeError> {
+        if !self
+            .inner
+            .lifecycles
+            .lock()
+            .expect("lifecycle task lock poisoned")
+            .accepting
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::Conflict,
+                "snapshot deletion is unavailable during cleanup",
+            ));
+        }
+        let removed = self.inner.snapshots.lock().await.remove(&snapshot_id);
+        if removed.is_none() {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::NotFound,
+                "snapshot not found",
+            ));
+        }
+        release_snapshot_id(&self.inner, &snapshot_id);
+        Ok(())
+    }
+
+    pub async fn fork_snapshot(&self, snapshot_id: &str) -> Result<String, RuntimeError> {
+        self.fork_snapshot_with(
+            snapshot_id,
+            |container, image| async move { podman::create_container(&container, &image).await },
+            |container, archive| async move {
+                podman::restore_workspace(&container, archive.as_slice()).await
+            },
+            |container| async move { podman::remove_container(&container).await },
+        )
+        .await
+    }
+
+    async fn fork_snapshot_with<
+        Create,
+        CreateFuture,
+        Restore,
+        RestoreFuture,
+        Remove,
+        RemoveFuture,
+    >(
+        &self,
+        snapshot_id: &str,
+        create_container: Create,
+        restore_workspace: Restore,
+        remove_container: Remove,
+    ) -> Result<String, RuntimeError>
+    where
+        Create: FnOnce(String, String) -> CreateFuture + Send + 'static,
+        CreateFuture: Future<Output = Result<(), RuntimeError>> + Send + 'static,
+        Restore: FnOnce(String, Arc<Vec<u8>>) -> RestoreFuture + Send + 'static,
+        RestoreFuture: Future<Output = Result<(), RuntimeError>> + Send + 'static,
+        Remove: FnOnce(String) -> RemoveFuture + Send + 'static,
+        RemoveFuture: Future<Output = Result<(), RuntimeError>> + Send + 'static,
+    {
+        let snapshot = self
+            .inner
+            .snapshots
+            .lock()
+            .await
+            .get(snapshot_id)
+            .cloned()
+            .ok_or_else(|| RuntimeError::new(RuntimeErrorKind::NotFound, "snapshot not found"))?;
+        self.create_with(
+            move |container, image| async move {
+                create_container(container.clone(), image).await?;
+                let archive = snapshot.archive();
+                restore_workspace(container, archive).await
+            },
+            remove_container,
         )
         .await
     }
@@ -205,6 +439,21 @@ impl Runtime {
                 .issued_environment_ids
                 .lock()
                 .expect("environment ID lock poisoned")
+                .insert(id.clone())
+            {
+                return Ok(id);
+            }
+        }
+    }
+
+    fn allocate_snapshot_id(&self) -> Result<String, RuntimeError> {
+        loop {
+            let id = generate_opaque_id("snap-", "snapshot")?;
+            if self
+                .inner
+                .issued_snapshot_ids
+                .lock()
+                .expect("snapshot ID lock poisoned")
                 .insert(id.clone())
             {
                 return Ok(id);
@@ -331,6 +580,18 @@ async fn finish_cleanup<Remove, RemoveFuture>(
         let _ = task.await;
     }
 
+    let snapshots: Vec<_> = inner
+        .snapshots
+        .lock()
+        .await
+        .drain()
+        .map(|(_, snapshot)| snapshot)
+        .collect();
+    for snapshot in &snapshots {
+        release_snapshot_id(&inner, &snapshot.summary().id);
+    }
+    drop(snapshots);
+
     let environments: Vec<_> = inner
         .environments
         .lock()
@@ -362,6 +623,99 @@ async fn finish_cleanup<Remove, RemoveFuture>(
         .collect();
     for removal in removals {
         let _ = removal.await;
+    }
+}
+
+async fn finish_save_snapshot<Capture, CaptureFuture>(
+    inner: Arc<StateInner>,
+    pending: PendingSnapshot,
+    result_sender: oneshot::Sender<Result<CreatedSnapshot, RuntimeError>>,
+    capture_workspace: Capture,
+) where
+    Capture: FnOnce(String, usize) -> CaptureFuture,
+    CaptureFuture: Future<Output = Result<Vec<u8>, RuntimeError>>,
+{
+    let PendingSnapshot {
+        id,
+        source_environment_id,
+        source_container_name,
+        slot,
+        byte_reservation,
+        capture_gate: _capture_gate,
+    } = pending;
+    let archive_limit = byte_reservation.num_permits();
+    let archive = match capture_workspace(source_container_name, archive_limit).await {
+        Ok(archive) => archive,
+        Err(error) => {
+            release_snapshot_id(&inner, &id);
+            let _ = result_sender.send(Err(error));
+            return;
+        }
+    };
+    if archive.len() > archive_limit {
+        release_snapshot_id(&inner, &id);
+        let _ = result_sender.send(Err(RuntimeError::new(
+            RuntimeErrorKind::Conflict,
+            if archive_limit == MAX_SNAPSHOT_BYTES {
+                "workspace snapshot exceeds the 64 MiB archive limit"
+            } else {
+                "workspace snapshot exceeds the remaining snapshot memory limit"
+            },
+        )));
+        return;
+    }
+    if result_sender.is_closed() {
+        release_snapshot_id(&inner, &id);
+        return;
+    }
+
+    let summary = SnapshotSummary {
+        id: id.clone(),
+        source_environment_id,
+        created_at_ms: now_ms(),
+        archive_bytes: archive.len() as u64,
+    };
+    let snapshot = Arc::new(Snapshot::new(
+        summary.clone(),
+        archive,
+        slot,
+        byte_reservation,
+    ));
+    let inserted = {
+        let mut snapshots = inner.snapshots.lock().await;
+        match snapshots.entry(id.clone()) {
+            Entry::Vacant(entry) => {
+                entry.insert(snapshot.clone());
+                true
+            }
+            Entry::Occupied(_) => false,
+        }
+    };
+    if !inserted {
+        release_snapshot_id(&inner, &id);
+        let _ = result_sender.send(Err(RuntimeError::new(
+            RuntimeErrorKind::Internal,
+            "could not publish the reserved snapshot ID",
+        )));
+        return;
+    }
+
+    let (acknowledgement, acknowledged) = oneshot::channel();
+    if result_sender
+        .send(Ok(CreatedSnapshot {
+            summary,
+            acknowledgement,
+        }))
+        .is_err()
+    {
+        if take_snapshot(&inner, &id, &snapshot).await.is_some() {
+            release_snapshot_id(&inner, &id);
+        }
+        return;
+    }
+
+    if acknowledged.await.is_err() && take_snapshot(&inner, &id, &snapshot).await.is_some() {
+        release_snapshot_id(&inner, &id);
     }
 }
 
@@ -506,6 +860,22 @@ async fn take_environment(
     }
 }
 
+async fn take_snapshot(
+    inner: &StateInner,
+    id: &str,
+    expected: &Arc<Snapshot>,
+) -> Option<Arc<Snapshot>> {
+    let mut snapshots = inner.snapshots.lock().await;
+    if snapshots
+        .get(id)
+        .is_some_and(|snapshot| Arc::ptr_eq(snapshot, expected))
+    {
+        snapshots.remove(id)
+    } else {
+        None
+    }
+}
+
 async fn clean_unpublished_environment<Remove, RemoveFuture>(
     inner: Arc<StateInner>,
     environment: Arc<Environment>,
@@ -538,6 +908,14 @@ fn release_environment_id(inner: &StateInner, id: &str) {
         .issued_environment_ids
         .lock()
         .expect("environment ID lock poisoned")
+        .remove(id);
+}
+
+fn release_snapshot_id(inner: &StateInner, id: &str) {
+    inner
+        .issued_snapshot_ids
+        .lock()
+        .expect("snapshot ID lock poisoned")
         .remove(id);
 }
 
@@ -642,13 +1020,17 @@ impl Transcript {
 }
 
 fn generate_environment_id() -> Result<String, RuntimeError> {
+    generate_opaque_id("env-", "environment")
+}
+
+fn generate_opaque_id(prefix: &str, kind: &str) -> Result<String, RuntimeError> {
     let mut bytes = [0_u8; 16];
     getrandom::fill(&mut bytes)
-        .map_err(|error| RuntimeError::internal("could not generate environment ID", error))?;
+        .map_err(|error| RuntimeError::internal(&format!("could not generate {kind} ID"), error))?;
 
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut id = String::with_capacity(4 + bytes.len() * 2);
-    id.push_str("env-");
+    let mut id = String::with_capacity(prefix.len() + bytes.len() * 2);
+    id.push_str(prefix);
     for byte in bytes {
         id.push(HEX[(byte >> 4) as usize] as char);
         id.push(HEX[(byte & 0x0f) as usize] as char);
@@ -678,6 +1060,377 @@ mod tests {
             assert!(id[4..].bytes().all(|byte| byte.is_ascii_hexdigit()));
         }
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn snapshot_ids_are_opaque_128_bit_values() {
+        let first = generate_opaque_id("snap-", "snapshot").unwrap();
+        let second = generate_opaque_id("snap-", "snapshot").unwrap();
+
+        for id in [&first, &second] {
+            assert_eq!(id.len(), 37);
+            assert!(id.starts_with("snap-"));
+            assert!(id[5..].bytes().all(|byte| byte.is_ascii_hexdigit()));
+        }
+        assert_ne!(first, second);
+    }
+
+    #[tokio::test]
+    async fn snapshots_are_listed_and_release_owned_limits_on_delete() {
+        let runtime = Runtime::new("unused".into());
+        insert_test_environment(&runtime, "snapshot-source").await;
+        let mut summaries = Vec::new();
+        for byte in 0..MAX_SNAPSHOTS as u8 {
+            summaries.push(
+                runtime
+                    .save_snapshot_with(
+                        "snapshot-source",
+                        move |_, _| async move { Ok(vec![byte]) },
+                    )
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        let listed = runtime.list_snapshots().await;
+        assert_eq!(listed.len(), MAX_SNAPSHOTS);
+        assert!(listed.windows(2).all(|pair| {
+            (pair[0].created_at_ms, &pair[0].id) <= (pair[1].created_at_ms, &pair[1].id)
+        }));
+        assert!(listed.iter().all(|summary| {
+            summary.source_environment_id == "snapshot-source" && summary.archive_bytes == 1
+        }));
+        assert_eq!(runtime.inner.snapshot_slots.available_permits(), 0);
+        assert_eq!(
+            runtime.inner.snapshot_bytes.available_permits(),
+            MAX_RETAINED_SNAPSHOT_BYTES - MAX_SNAPSHOTS
+        );
+
+        let error = runtime
+            .save_snapshot_with("snapshot-source", |_, _| async { Ok(vec![5]) })
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), RuntimeErrorKind::Conflict);
+
+        runtime
+            .delete_snapshot(summaries[0].id.clone())
+            .await
+            .unwrap();
+        assert_eq!(runtime.inner.snapshot_slots.available_permits(), 1);
+        assert_eq!(
+            runtime.inner.snapshot_bytes.available_permits(),
+            MAX_RETAINED_SNAPSHOT_BYTES - (MAX_SNAPSHOTS - 1)
+        );
+        assert!(
+            !runtime
+                .inner
+                .issued_snapshot_ids
+                .lock()
+                .unwrap()
+                .contains(&summaries[0].id)
+        );
+
+        runtime.cleanup_with(|_| async { Ok(()) }).await;
+        assert!(runtime.inner.snapshots.lock().await.is_empty());
+        assert_eq!(
+            runtime.inner.snapshot_slots.available_permits(),
+            MAX_SNAPSHOTS
+        );
+        assert_eq!(
+            runtime.inner.snapshot_bytes.available_permits(),
+            MAX_RETAINED_SNAPSHOT_BYTES
+        );
+        assert_eq!(runtime.inner.snapshot_capture.available_permits(), 1);
+        assert!(runtime.inner.issued_snapshot_ids.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn concurrent_snapshot_captures_are_serialized() {
+        let runtime = Runtime::new("unused".into());
+        insert_test_environment(&runtime, "snapshot-memory-source").await;
+        let (first_started_sender, first_started_receiver) = oneshot::channel();
+        let (first_finish_sender, first_finish_receiver) = oneshot::channel();
+        let first_runtime = runtime.clone();
+        let first = tokio::spawn(async move {
+            first_runtime
+                .save_snapshot_with("snapshot-memory-source", move |_, limit| async move {
+                    let _ = first_started_sender.send(());
+                    let _ = first_finish_receiver.await;
+                    assert_eq!(limit, MAX_SNAPSHOT_BYTES);
+                    Ok(vec![1])
+                })
+                .await
+        });
+        first_started_receiver.await.unwrap();
+
+        let (second_started_sender, mut second_started_receiver) = oneshot::channel();
+        let (second_finish_sender, second_finish_receiver) = oneshot::channel();
+        let second_runtime = runtime.clone();
+        let second = tokio::spawn(async move {
+            second_runtime
+                .save_snapshot_with("snapshot-memory-source", move |_, limit| async move {
+                    let _ = second_started_sender.send(limit);
+                    let _ = second_finish_receiver.await;
+                    Ok(vec![2])
+                })
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            second_started_receiver.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(runtime.inner.snapshot_capture.available_permits(), 0);
+
+        first_finish_sender.send(()).unwrap();
+        first.await.unwrap().unwrap();
+        assert_eq!(second_started_receiver.await.unwrap(), MAX_SNAPSHOT_BYTES);
+        second_finish_sender.send(()).unwrap();
+        second.await.unwrap().unwrap();
+        assert_eq!(
+            runtime.inner.snapshot_bytes.available_permits(),
+            MAX_RETAINED_SNAPSHOT_BYTES - 2
+        );
+        runtime.cleanup_with(|_| async { Ok(()) }).await;
+    }
+
+    #[tokio::test]
+    async fn capture_uses_the_remaining_total_budget_instead_of_requiring_sixty_four_mib() {
+        let runtime = Runtime::new("unused".into());
+        insert_test_environment(&runtime, "remaining-budget-source").await;
+        let retained = runtime
+            .inner
+            .snapshot_bytes
+            .clone()
+            .try_acquire_many_owned((90 * 1024 * 1024) as u32)
+            .unwrap();
+
+        let summary = runtime
+            .save_snapshot_with("remaining-budget-source", |_, limit| async move {
+                assert_eq!(limit, 38 * 1024 * 1024);
+                Ok(vec![1])
+            })
+            .await
+            .unwrap();
+        assert_eq!(summary.archive_bytes, 1);
+
+        drop(retained);
+        runtime.cleanup_with(|_| async { Ok(()) }).await;
+        assert_eq!(
+            runtime.inner.snapshot_bytes.available_permits(),
+            MAX_RETAINED_SNAPSHOT_BYTES
+        );
+    }
+
+    #[tokio::test]
+    async fn canceled_snapshot_capture_releases_all_ownership_after_capture_finishes() {
+        let runtime = Runtime::new("unused".into());
+        insert_test_environment(&runtime, "canceled-snapshot-source").await;
+        let request_runtime = runtime.clone();
+        let (started_sender, started_receiver) = oneshot::channel();
+        let (finish_sender, finish_receiver) = oneshot::channel();
+        let request = tokio::spawn(async move {
+            request_runtime
+                .save_snapshot_with("canceled-snapshot-source", move |_, _| async move {
+                    let _ = started_sender.send(());
+                    let _ = finish_receiver.await;
+                    Ok(vec![1, 2, 3])
+                })
+                .await
+        });
+
+        started_receiver.await.unwrap();
+        request.abort();
+        let _ = request.await;
+        assert_eq!(runtime.inner.snapshot_slots.available_permits(), 3);
+        assert_eq!(
+            runtime.inner.snapshot_bytes.available_permits(),
+            64 * 1024 * 1024
+        );
+        finish_sender.send(()).unwrap();
+        wait_until(|| runtime.inner.snapshot_slots.available_permits() == MAX_SNAPSHOTS).await;
+        assert_eq!(
+            runtime.inner.snapshot_bytes.available_permits(),
+            MAX_RETAINED_SNAPSHOT_BYTES
+        );
+        assert!(runtime.inner.snapshots.lock().await.is_empty());
+        assert!(runtime.inner.issued_snapshot_ids.lock().unwrap().is_empty());
+        runtime.cleanup_with(|_| async { Ok(()) }).await;
+    }
+
+    #[tokio::test]
+    async fn unacknowledged_snapshot_delivery_is_removed() {
+        let runtime = Runtime::new("unused".into());
+        let id = runtime.allocate_snapshot_id().unwrap();
+        let pending = PendingSnapshot {
+            id: id.clone(),
+            source_environment_id: "env-source".into(),
+            source_container_name: "container-source".into(),
+            slot: runtime
+                .inner
+                .snapshot_slots
+                .clone()
+                .try_acquire_owned()
+                .unwrap(),
+            byte_reservation: runtime
+                .inner
+                .snapshot_bytes
+                .clone()
+                .try_acquire_many_owned(MAX_SNAPSHOT_BYTES as u32)
+                .unwrap(),
+            capture_gate: runtime
+                .inner
+                .snapshot_capture
+                .clone()
+                .try_acquire_owned()
+                .unwrap(),
+        };
+        let (result_sender, result_receiver) = oneshot::channel();
+        let task = tokio::spawn(finish_save_snapshot(
+            runtime.inner.clone(),
+            pending,
+            result_sender,
+            |_, _| async { Ok(vec![1, 2, 3]) },
+        ));
+
+        let delivered = result_receiver.await.unwrap().unwrap();
+        assert_eq!(delivered.summary.id, id);
+        assert_eq!(runtime.inner.snapshots.lock().await.len(), 1);
+        drop(delivered);
+        task.await.unwrap();
+
+        assert!(runtime.inner.snapshots.lock().await.is_empty());
+        assert_eq!(
+            runtime.inner.snapshot_slots.available_permits(),
+            MAX_SNAPSHOTS
+        );
+        assert_eq!(
+            runtime.inner.snapshot_bytes.available_permits(),
+            MAX_RETAINED_SNAPSHOT_BYTES
+        );
+        assert!(runtime.inner.issued_snapshot_ids.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn fork_restores_archive_before_publishing_fresh_environment() {
+        let runtime = Runtime::new("unused".into());
+        insert_test_environment(&runtime, "fork-source").await;
+        let snapshot = runtime
+            .save_snapshot_with("fork-source", |_, _| async { Ok(vec![7, 8, 9]) })
+            .await
+            .unwrap();
+        let (restored_sender, restored_receiver) = oneshot::channel();
+        let fork_id = runtime
+            .fork_snapshot_with(
+                &snapshot.id,
+                |_, _| async { Ok(()) },
+                move |container, archive| async move {
+                    let _ = restored_sender.send((container, archive.as_ref().clone()));
+                    Ok(())
+                },
+                |_| async { Ok(()) },
+            )
+            .await
+            .unwrap();
+
+        let (container, archive) = restored_receiver.await.unwrap();
+        assert!(container.starts_with("clannon-"));
+        assert_eq!(archive, vec![7, 8, 9]);
+        assert_ne!(fork_id, "fork-source");
+        let fork = runtime.find(&fork_id).await.unwrap();
+        assert!(fork.transcript_snapshot().await.is_empty());
+        assert_eq!(
+            fork.activity_snapshot().0[0].activity,
+            ExecutionActivity::EnvironmentReady
+        );
+        assert_eq!(fork.activity_snapshot().0.len(), 1);
+
+        runtime.cleanup_with(|_| async { Ok(()) }).await;
+    }
+
+    #[tokio::test]
+    async fn deleting_snapshot_during_fork_keeps_bytes_reserved_through_restore() {
+        let runtime = Runtime::new("unused".into());
+        insert_test_environment(&runtime, "delete-during-fork-source").await;
+        let snapshot = runtime
+            .save_snapshot_with("delete-during-fork-source", |_, _| async {
+                Ok(vec![4, 5, 6])
+            })
+            .await
+            .unwrap();
+        let (restore_started_sender, restore_started_receiver) = oneshot::channel();
+        let (finish_restore_sender, finish_restore_receiver) = oneshot::channel();
+        let fork_runtime = runtime.clone();
+        let snapshot_id = snapshot.id.clone();
+        let fork = tokio::spawn(async move {
+            fork_runtime
+                .fork_snapshot_with(
+                    &snapshot_id,
+                    |_, _| async { Ok(()) },
+                    move |_, archive| async move {
+                        let _ = restore_started_sender.send(archive.len());
+                        let _ = finish_restore_receiver.await;
+                        Ok(())
+                    },
+                    |_| async { Ok(()) },
+                )
+                .await
+        });
+
+        assert_eq!(restore_started_receiver.await.unwrap(), 3);
+        runtime.delete_snapshot(snapshot.id).await.unwrap();
+        assert!(runtime.inner.snapshots.lock().await.is_empty());
+        assert_eq!(
+            runtime.inner.snapshot_bytes.available_permits(),
+            MAX_RETAINED_SNAPSHOT_BYTES - 3,
+            "the in-flight restore must continue owning the archive bytes"
+        );
+
+        finish_restore_sender.send(()).unwrap();
+        fork.await.unwrap().unwrap();
+        assert_eq!(
+            runtime.inner.snapshot_bytes.available_permits(),
+            MAX_RETAINED_SNAPSHOT_BYTES
+        );
+        assert_eq!(
+            runtime.inner.snapshot_slots.available_permits(),
+            MAX_SNAPSHOTS
+        );
+        runtime.cleanup_with(|_| async { Ok(()) }).await;
+    }
+
+    #[tokio::test]
+    async fn failed_snapshot_restore_removes_the_unpublished_fork() {
+        let runtime = Runtime::new("unused".into());
+        insert_test_environment(&runtime, "restore-source").await;
+        let snapshot = runtime
+            .save_snapshot_with("restore-source", |_, _| async { Ok(vec![1]) })
+            .await
+            .unwrap();
+        let (removed_sender, removed_receiver) = oneshot::channel();
+        let error = runtime
+            .fork_snapshot_with(
+                &snapshot.id,
+                |_, _| async { Ok(()) },
+                |_, _| async {
+                    Err(RuntimeError::new(
+                        RuntimeErrorKind::BadGateway,
+                        "test restore failed",
+                    ))
+                },
+                move |container| async move {
+                    let _ = removed_sender.send(container);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.kind(), RuntimeErrorKind::BadGateway);
+        assert!(removed_receiver.await.unwrap().starts_with("clannon-"));
+        assert_eq!(runtime.inner.environments.lock().await.len(), 1);
+        assert_eq!(runtime.inner.environment_slots.available_permits(), 3);
+        runtime.cleanup_with(|_| async { Ok(()) }).await;
     }
 
     #[tokio::test]

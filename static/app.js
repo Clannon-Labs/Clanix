@@ -1,5 +1,6 @@
 const elements = {
   create: document.querySelector("#create"),
+  saveSnapshot: document.querySelector("#save-snapshot"),
   colorTheme: document.querySelector("#color-theme"),
   destroy: document.querySelector("#destroy"),
   refresh: document.querySelector("#refresh"),
@@ -17,6 +18,12 @@ const elements = {
   stateLabel: document.querySelector("#state-label"),
   warnings: document.querySelector("#warnings"),
   snapshotTime: document.querySelector("#snapshot-time"),
+  snapshotSection: document.querySelector("#snapshot-section"),
+  snapshotTitle: document.querySelector("#snapshot-title"),
+  snapshotCount: document.querySelector("#snapshot-count"),
+  snapshotForkHelp: document.querySelector("#snapshot-fork-help"),
+  snapshotList: document.querySelector("#snapshot-list"),
+  snapshotAnnouncement: document.querySelector("#snapshot-announcement"),
 };
 
 const MAX_TERMINAL_OUTPUT_CHARACTERS = 200 * 1024;
@@ -43,9 +50,18 @@ let accessToken = bootstrapAccessToken();
 let accessGeneration = 0;
 let accessCandidateGeneration = 0;
 let screenOutputNoticeShown = false;
+let snapshots = [];
+let snapshotsLoaded = false;
+let snapshotsLoading = false;
+let snapshotLoadGeneration = 0;
+let snapshotOperation = null;
+let snapshotError = "";
+let forkWelcome = "";
+let creating = false;
 
 setThemePreference(readThemePreference());
 elements.create.addEventListener("click", createEnvironment);
+elements.saveSnapshot.addEventListener("click", saveEnvironmentSnapshot);
 elements.colorTheme.addEventListener("change", () => setThemePreference(elements.colorTheme.value, true));
 elements.destroy.addEventListener("click", destroyEnvironment);
 elements.refresh.addEventListener("click", refreshObservations);
@@ -54,6 +70,7 @@ elements.command.addEventListener("keydown", handleCommandKeydown);
 elements.command.addEventListener("input", updateCommandComposer);
 elements.reconnect.addEventListener("click", handleReconnect);
 elements.interrupt.addEventListener("click", sendInterrupt);
+elements.snapshotList.addEventListener("click", handleSnapshotAction);
 window.addEventListener("beforeunload", () => socket?.close());
 window.addEventListener("hashchange", handleAccessFragment);
 updateEnvironmentControls();
@@ -63,6 +80,7 @@ if (!accessToken) {
   elements.output.textContent = "Private URL remains in the address bar because browser storage is unavailable. Close this tab when finished.";
   announceTerminal(elements.output.textContent);
 }
+if (accessToken) void refreshSnapshots();
 
 function bootstrapAccessToken() {
   let fragment = "";
@@ -141,8 +159,10 @@ async function handleAccessFragment() {
   accessGeneration += 1;
   environmentId = null;
   destroying = false;
+  clearSnapshots();
   resetEnvironment();
   elements.output.textContent = "Private access restored. Create an environment when ready.";
+  void refreshSnapshots();
 }
 
 function isValidAccessToken(value) {
@@ -188,6 +208,7 @@ function lockForAccess() {
   socket = null;
   terminalState = "disconnected";
   elements.create.disabled = true;
+  elements.saveSnapshot.disabled = true;
   elements.destroy.disabled = true;
   elements.refresh.disabled = true;
   elements.command.disabled = true;
@@ -200,6 +221,8 @@ function lockForAccess() {
   elements.terminalStatus.dataset.state = "disconnected";
   elements.terminalStatus.textContent = "Locked";
   elements.output.textContent = ACCESS_INSTRUCTION;
+  clearSnapshots();
+  renderSnapshots();
   announceTerminal(ACCESS_INSTRUCTION);
 }
 
@@ -226,11 +249,296 @@ function setThemePreference(theme, persist = false) {
   }
 }
 
+async function refreshSnapshots() {
+  if (!accessToken || snapshotsLoading || snapshotOperation) return;
+  const loadGeneration = ++snapshotLoadGeneration;
+  snapshotsLoading = true;
+  snapshotError = "";
+  updateEnvironmentControls();
+  renderSnapshots();
+  try {
+    const response = await apiFetch("/api/snapshots", { cache: "no-store" });
+    const data = await readResponse(response);
+    if (!Array.isArray(data)) {
+      throw new Error("Clannon returned an invalid snapshot list.");
+    }
+    snapshots = data.map(normalizeSnapshotSummary);
+    snapshotsLoaded = true;
+  } catch (error) {
+    if (error instanceof StaleAccessRequest) return;
+    if (!accessToken) {
+      lockForAccess();
+      return;
+    }
+    snapshotError = `Session snapshots could not be loaded. ${errorMessage(error)}`;
+  } finally {
+    if (loadGeneration === snapshotLoadGeneration) {
+      snapshotsLoading = false;
+      updateEnvironmentControls();
+      renderSnapshots();
+    }
+  }
+}
+
+async function saveEnvironmentSnapshot() {
+  if (!environmentId || !accessToken || snapshotsLoading || snapshotOperation) return;
+  const sourceEnvironmentId = environmentId;
+  const operation = { kind: "save", id: sourceEnvironmentId };
+  snapshotOperation = operation;
+  snapshotError = "";
+  updateEnvironmentControls();
+  renderSnapshots();
+  announceSnapshot("Saving a session snapshot of /workspace. Background writes may race.");
+  try {
+    const response = await apiFetch(`/api/environments/${encodeURIComponent(sourceEnvironmentId)}/snapshots`, {
+      method: "POST",
+    });
+    const status = response.status;
+    let summary;
+    try {
+      summary = normalizeSnapshotSummary(await readResponse(response));
+    } catch (error) {
+      if (!(error instanceof StaleAccessRequest)) error.status = status;
+      throw error;
+    }
+    snapshots = [...snapshots.filter((snapshot) => snapshot.id !== summary.id), summary];
+    snapshotsLoaded = true;
+    announceSnapshot("Snapshot saved for this Clannon session.");
+  } catch (error) {
+    if (error instanceof StaleAccessRequest) return;
+    if (!accessToken) {
+      lockForAccess();
+      return;
+    }
+    snapshotError = snapshotFailureMessage("save", error);
+    announceSnapshot(snapshotError);
+  } finally {
+    if (snapshotOperation === operation) {
+      snapshotOperation = null;
+      updateEnvironmentControls();
+      renderSnapshots();
+    }
+  }
+}
+
+async function handleSnapshotAction(event) {
+  const action = event.target?.dataset?.snapshotAction;
+  const snapshotIndex = Number(event.target?.dataset?.snapshotIndex);
+  if (!action || !Number.isSafeInteger(snapshotIndex) || snapshotIndex < 0
+    || snapshotIndex >= snapshots.length || snapshotsLoading || snapshotOperation || creating || !accessToken) return;
+  const snapshotId = snapshots[snapshotIndex].id;
+  if (action === "fork") {
+    await forkSnapshot(snapshotId);
+  } else if (action === "delete") {
+    await deleteSnapshot(snapshotId);
+  }
+}
+
+async function forkSnapshot(snapshotId) {
+  if (environmentId || snapshotOperation) return;
+  const operation = { kind: "fork", id: snapshotId };
+  snapshotOperation = operation;
+  snapshotError = "";
+  updateEnvironmentControls();
+  renderSnapshots();
+  announceSnapshot(`Forking snapshot ${makeControlsVisible(snapshotId)} into a fresh environment.`);
+  try {
+    const response = await apiFetch(`/api/snapshots/${encodeURIComponent(snapshotId)}/forks`, {
+      method: "POST",
+    });
+    const status = response.status;
+    let data;
+    try {
+      data = await readResponse(response);
+      if (!data || typeof data.id !== "string" || !data.id) {
+        throw new Error("Clannon returned an invalid forked environment.");
+      }
+    } catch (error) {
+      if (!(error instanceof StaleAccessRequest)) error.status = status;
+      throw error;
+    }
+    resetEnvironment();
+    environmentId = data.id;
+    forkWelcome = `Forked from snapshot ${makeControlsVisible(snapshotId)}. /workspace was copied; this shell and its evidence are new.\n`;
+    elements.output.textContent = `${forkWelcome}Connecting a fresh shell…\n`;
+    elements.environmentId.textContent = makeControlsVisible(environmentId);
+    elements.stateLabel.textContent = "Environment running";
+    elements.stateDot.classList.add("running");
+    snapshotOperation = null;
+    updateEnvironmentControls();
+    renderSnapshots();
+    announceSnapshot(`Forked snapshot ${makeControlsVisible(snapshotId)} into a fresh environment.`);
+    connectTerminal(true);
+    await refreshObservations();
+  } catch (error) {
+    if (error instanceof StaleAccessRequest) return;
+    if (!accessToken) {
+      lockForAccess();
+      return;
+    }
+    snapshotError = snapshotFailureMessage("fork", error);
+    announceSnapshot(snapshotError);
+  } finally {
+    if (snapshotOperation === operation) {
+      snapshotOperation = null;
+      updateEnvironmentControls();
+      renderSnapshots();
+    }
+  }
+}
+
+async function deleteSnapshot(snapshotId) {
+  const visibleId = makeControlsVisible(snapshotId);
+  if (!window.confirm(`Delete session snapshot ${visibleId}? Existing forked environments are unaffected.`)) return;
+  const operation = { kind: "delete", id: snapshotId };
+  snapshotOperation = operation;
+  snapshotError = "";
+  updateEnvironmentControls();
+  renderSnapshots();
+  announceSnapshot(`Deleting snapshot ${visibleId}.`);
+  try {
+    const response = await apiFetch(`/api/snapshots/${encodeURIComponent(snapshotId)}`, { method: "DELETE" });
+    const status = response.status;
+    try {
+      await readResponse(response);
+    } catch (error) {
+      if (!(error instanceof StaleAccessRequest)) error.status = status;
+      throw error;
+    }
+    snapshots = snapshots.filter((snapshot) => snapshot.id !== snapshotId);
+    announceSnapshot(`Snapshot ${visibleId} deleted. Existing forks are unaffected.`);
+    elements.snapshotTitle.focus();
+  } catch (error) {
+    if (error instanceof StaleAccessRequest) return;
+    if (!accessToken) {
+      lockForAccess();
+      return;
+    }
+    if (error.status === 404) {
+      snapshots = snapshots.filter((snapshot) => snapshot.id !== snapshotId);
+      snapshotError = "This snapshot is no longer available.";
+      elements.snapshotTitle.focus();
+    } else {
+      snapshotError = `Snapshot could not be deleted. ${errorMessage(error)}`;
+    }
+    announceSnapshot(snapshotError);
+  } finally {
+    if (snapshotOperation === operation) {
+      snapshotOperation = null;
+      updateEnvironmentControls();
+      renderSnapshots();
+    }
+  }
+}
+
+function normalizeSnapshotSummary(summary) {
+  if (!summary || typeof summary !== "object"
+    || typeof summary.id !== "string" || !summary.id
+    || typeof summary.source_environment_id !== "string" || !summary.source_environment_id
+    || !Number.isSafeInteger(summary.created_at_ms) || summary.created_at_ms < 0
+    || !Number.isSafeInteger(summary.archive_bytes) || summary.archive_bytes < 0) {
+    throw new Error("Clannon returned invalid snapshot details.");
+  }
+  return {
+    id: summary.id,
+    source_environment_id: summary.source_environment_id,
+    created_at_ms: summary.created_at_ms,
+    archive_bytes: summary.archive_bytes,
+  };
+}
+
+function renderSnapshots() {
+  const busy = snapshotsLoading || Boolean(snapshotOperation);
+  elements.snapshotSection.setAttribute("aria-busy", String(busy));
+  elements.snapshotCount.textContent = String(snapshots.length);
+  elements.snapshotCount.setAttribute(
+    "aria-label",
+    `${snapshots.length} session ${snapshots.length === 1 ? "snapshot" : "snapshots"}`,
+  );
+  elements.snapshotForkHelp.hidden = !environmentId || snapshots.length === 0;
+
+  if (!accessToken) {
+    elements.snapshotList.innerHTML = "<p>Private access is required to view session snapshots.</p>";
+    return;
+  }
+
+  const notice = snapshotError
+    ? `<p class="snapshot-error" role="alert">${escapeHtml(makeControlsVisible(snapshotError))}</p>`
+    : "";
+  if (!snapshotsLoaded && snapshotsLoading) {
+    elements.snapshotList.innerHTML = `${notice}<p>Loading session snapshots…</p>`;
+    return;
+  }
+  if (!snapshotsLoaded && snapshotError) {
+    elements.snapshotList.innerHTML = `${notice}<p>Snapshot availability is unknown.</p>`;
+    return;
+  }
+  if (snapshots.length === 0) {
+    const empty = environmentId
+      ? "No snapshots yet. Save /workspace to fork it later."
+      : "No snapshots in this Clannon session.";
+    elements.snapshotList.innerHTML = `${notice}<p>${empty}</p>`;
+    return;
+  }
+
+  const rows = snapshots.map((snapshot, snapshotIndex) => {
+    const visibleId = makeControlsVisible(snapshot.id);
+    const sourceId = makeControlsVisible(snapshot.source_environment_id);
+    const timestamp = formatEvidenceTimestamp(snapshot.created_at_ms);
+    const savedAt = timestamp.datetime
+      ? `<time datetime="${escapeHtml(timestamp.datetime)}" title="${escapeHtml(timestamp.datetime)}">${escapeHtml(timestamp.label)}</time>`
+      : "Unknown time";
+    const forking = snapshotOperation?.kind === "fork" && snapshotOperation.id === snapshot.id;
+    const deleting = snapshotOperation?.kind === "delete" && snapshotOperation.id === snapshot.id;
+    const actionsDisabled = Boolean(snapshotOperation) || creating;
+    const forkDisabled = actionsDisabled || Boolean(environmentId);
+    return `<li class="snapshot-item">
+      <div class="snapshot-item-copy">
+        <code>${escapeHtml(visibleId)}</code>
+        <small>From ${escapeHtml(sourceId)} · ${savedAt} · ${escapeHtml(formatBytes(snapshot.archive_bytes))}</small>
+      </div>
+      <div class="snapshot-item-actions">
+        <button type="button" data-snapshot-action="fork" data-snapshot-index="${snapshotIndex}" aria-label="Fork snapshot ${escapeHtml(visibleId)}" aria-describedby="snapshot-scope${environmentId ? " snapshot-fork-help" : ""}"${forkDisabled ? " disabled" : ""}>${forking ? "Forking…" : "Fork"}</button>
+        <button type="button" data-snapshot-action="delete" data-snapshot-index="${snapshotIndex}" aria-label="Delete snapshot ${escapeHtml(visibleId)}"${actionsDisabled ? " disabled" : ""}>${deleting ? "Deleting…" : "Delete"}</button>
+      </div>
+    </li>`;
+  }).join("");
+  elements.snapshotList.innerHTML = `${notice}<ul class="snapshot-items">${rows}</ul>`;
+}
+
+function clearSnapshots() {
+  snapshotLoadGeneration += 1;
+  snapshots = [];
+  snapshotsLoaded = false;
+  snapshotsLoading = false;
+  snapshotOperation = null;
+  snapshotError = "";
+  elements.snapshotAnnouncement.textContent = "";
+}
+
+function announceSnapshot(message) {
+  elements.snapshotAnnouncement.textContent = makeControlsVisible(String(message));
+}
+
+function snapshotFailureMessage(action, error) {
+  if (error.status === 404) return "This snapshot is no longer available.";
+  if (action === "fork" && error.status === 409) {
+    return "Clannon already has 4 environments. Destroy one before forking.";
+  }
+  const lead = action === "save" ? "Snapshot could not be saved." : "Environment could not be forked.";
+  return `${lead} ${errorMessage(error)}`;
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function createEnvironment() {
   if (!accessToken) {
     lockForAccess();
     return;
   }
+  if (snapshotOperation || creating) return;
   setBusy(true, "Starting isolated Linux…");
   elements.output.textContent = "Creating a rootless container. The first run may pull a small image…\n";
   try {
@@ -241,6 +549,7 @@ async function createEnvironment() {
     elements.stateLabel.textContent = "Environment running";
     elements.stateDot.classList.add("running");
     updateEnvironmentControls();
+    renderSnapshots();
     connectTerminal(true);
     await refreshObservations();
   } catch (error) {
@@ -443,7 +752,8 @@ function handleTerminalControl(text, connection) {
       return;
     }
     if (connection.clearOutput) {
-      elements.output.textContent = "Clannon environment ready.\n";
+      elements.output.textContent = forkWelcome || "Clannon environment ready.\n";
+      forkWelcome = "";
       screenOutputNoticeShown = false;
     } else if (control.resumed) {
       appendOutput("\n[shell preserved — recent output produced while detached may be in Transcript]\n");
@@ -862,7 +1172,7 @@ function renderTranscript(transcript) {
 }
 
 async function destroyEnvironment() {
-  if (!environmentId || !accessToken) return;
+  if (!environmentId || !accessToken || snapshotOperation) return;
   const id = environmentId;
   destroying = true;
   updateEnvironmentControls();
@@ -929,6 +1239,7 @@ function resetEnvironment() {
   environmentId = null;
   socket = null;
   destroying = false;
+  forkWelcome = "";
   screenOutputNoticeShown = false;
   elements.command.value = "";
   updateCommandComposer();
@@ -947,14 +1258,18 @@ function resetEnvironment() {
   });
   elements.snapshotTime.textContent = "Evidence appears after the environment starts.";
   elements.warnings.hidden = true;
+  renderSnapshots();
 }
 
 function updateEnvironmentControls() {
   const hasAccess = Boolean(accessToken);
   const hasEnvironment = Boolean(environmentId);
-  elements.destroy.disabled = !hasAccess || !hasEnvironment || destroying;
+  const snapshotMutating = Boolean(snapshotOperation);
+  elements.destroy.disabled = !hasAccess || !hasEnvironment || destroying || snapshotMutating || creating;
+  elements.saveSnapshot.disabled = !hasAccess || !hasEnvironment || destroying || snapshotsLoading || snapshotMutating || creating;
+  elements.saveSnapshot.textContent = snapshotOperation?.kind === "save" ? "Saving snapshot…" : "Save snapshot";
   elements.refresh.disabled = !hasAccess || !hasEnvironment || destroying;
-  elements.create.disabled = !hasAccess || hasEnvironment;
+  elements.create.disabled = !hasAccess || hasEnvironment || snapshotMutating || creating;
   updateTerminalControls();
 }
 
@@ -996,9 +1311,11 @@ function isCurrentSocket(candidate, id) {
 }
 
 function setBusy(busy, label = "") {
-  elements.create.disabled = !accessToken || busy || Boolean(environmentId);
+  creating = busy;
+  updateEnvironmentControls();
   elements.create.textContent = busy ? "Creating…" : "Create environment";
   if (label) elements.stateLabel.textContent = label;
+  renderSnapshots();
 }
 
 function appendOutput(text) {

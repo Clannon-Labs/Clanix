@@ -44,8 +44,19 @@
           <p>Start a disposable Linux environment, run ordinary shell commands, then inspect its activity, process, file, network, and transcript evidence.</p>
           <div class="buttons">
             <button id="create" class="primary">Create environment</button>
+            <button id="save-snapshot" class="quiet" disabled>Save snapshot</button>
             <button id="destroy" class="quiet" disabled>Destroy</button>
           </div>
+          <section id="snapshot-section" class="session-snapshots" aria-labelledby="snapshot-title" aria-busy="true">
+            <header>
+              <h2 id="snapshot-title" tabindex="-1">Session snapshots</h2>
+              <span id="snapshot-count" aria-label="0 session snapshots">0</span>
+            </header>
+            <p id="snapshot-scope">Copies <code>/workspace</code> only. Snapshots last until this Clannon process stops. Background writes may race while a snapshot is saved. Forks start with a fresh shell and evidence.</p>
+            <p id="snapshot-fork-help" class="snapshot-fork-help" hidden>Destroy the active environment before forking.</p>
+            <div id="snapshot-list" class="snapshot-list">Loading session snapshots…</div>
+            <span id="snapshot-announcement" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span>
+          </section>
         </div>
       </section>
 

@@ -17,6 +17,10 @@ Read `PROJECT.md` before changing product behavior.
   remains the central product authority and may delegate domains to lead agents,
   which can coordinate narrower experts. Keep ownership, integration, and final
   acceptance in the primary agent.
+- Use `scripts/crew.sh run` for substantial scoped implementation or deep expert
+  work that benefits from an independent Codex context and durable result. Use
+  built-in subagents for fast read-only lookups whose answer belongs directly in
+  the current context. Only the primary agent commits delegated work.
 - Match the team to the work. Do not manufacture an organization for a trivial
   change, but do not conserve agent usage when independent expert work would
   improve speed, depth, or verification.
@@ -50,6 +54,11 @@ Read `PROJECT.md` before changing product behavior.
   sessions, observations, and the private rootless Podman command boundary.
 - `static/`: dependency-free browser UI.
 - `tests/smoke.sh`: opt-in real Podman lifecycle proof.
+- `scripts/crew.sh`: Codex-only scoped expert dispatcher; workflow in
+  `scripts/README.md`.
+- `comms/`: tracked expert-run provenance and concise durable status.
+- `reports/`: gitignored deep expert evidence, organized by role.
+- `proposals/`: gitignored decisions awaiting coordinator rulings.
 - `PROJECT.md`: product mission, V0 contract, and architectural boundaries.
 
 ## Commands

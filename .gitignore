@@ -1,3 +1,9 @@
 /target
 .DS_Store
 
+# Local multi-agent coordination. Durable summaries belong in comms/ or docs/.
+/.agents/briefs/
+/.agents/runs/
+/reports/*/
+/proposals/to-coordinator/
+/proposals/archive/

@@ -430,10 +430,10 @@ async fn finish_create<Create, CreateFuture, Remove, RemoveFuture>(
         return;
     }
 
-    if acknowledged.await.is_err()
-        && let Some(environment) = take_environment(&inner, &id, &environment).await
-    {
-        clean_unpublished_environment(inner, environment, remove_container).await;
+    if acknowledged.await.is_err() {
+        if let Some(environment) = take_environment(&inner, &id, &environment).await {
+            clean_unpublished_environment(inner, environment, remove_container).await;
+        }
     }
 }
 

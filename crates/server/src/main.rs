@@ -4,6 +4,8 @@ use runtime::Runtime;
 
 mod access;
 mod app;
+mod cli;
+mod doctor;
 mod error;
 mod terminal;
 
@@ -12,32 +14,72 @@ const DEFAULT_IMAGE: &str = "docker.io/library/alpine:3.20";
 
 #[tokio::main]
 async fn main() {
+    let command = match cli::parse(std::env::args_os().skip(1)) {
+        Ok(command) => command,
+        Err(error) => {
+            eprintln!("{error}\n\n{}", cli::usage());
+            std::process::exit(2);
+        }
+    };
+    let exit_code = match command {
+        cli::Command::Serve => serve().await,
+        cli::Command::Doctor => {
+            let bind = std::env::var("CLANNON_BIND").unwrap_or_else(|_| DEFAULT_BIND.to_owned());
+            let report = doctor::run(&bind).await;
+            println!("{report}");
+            i32::from(!report.passed())
+        }
+        cli::Command::Version => {
+            println!("clannon {}", env!("CARGO_PKG_VERSION"));
+            0
+        }
+        cli::Command::Help => {
+            println!("{}", cli::usage());
+            0
+        }
+    };
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+}
+
+async fn serve() -> i32 {
     let bind = std::env::var("CLANNON_BIND").unwrap_or_else(|_| DEFAULT_BIND.to_owned());
     let image = std::env::var("CLANNON_IMAGE").unwrap_or_else(|_| DEFAULT_IMAGE.to_owned());
-    let address = parse_bind(&bind).unwrap_or_else(|error| {
-        eprintln!("{error}");
-        std::process::exit(2);
-    });
+    let address = match parse_bind(&bind) {
+        Ok(address) => address,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
 
     if let Err(error) = Runtime::verify_rootless().await {
         eprintln!("Clannon requires a working rootless Podman installation: {error}");
-        std::process::exit(1);
+        return 1;
     }
 
-    let listener = tokio::net::TcpListener::bind(address)
-        .await
-        .unwrap_or_else(|error| {
+    let listener = match tokio::net::TcpListener::bind(address).await {
+        Ok(listener) => listener,
+        Err(error) => {
             eprintln!("could not listen on {address}: {error}");
-            std::process::exit(1);
-        });
-    let local_address = listener.local_addr().unwrap_or_else(|error| {
-        eprintln!("could not determine listening address: {error}");
-        std::process::exit(1);
-    });
-    let access = access::AccessPolicy::generate(local_address).unwrap_or_else(|error| {
-        eprintln!("could not generate the local access capability: {error}");
-        std::process::exit(1);
-    });
+            return 1;
+        }
+    };
+    let local_address = match listener.local_addr() {
+        Ok(address) => address,
+        Err(error) => {
+            eprintln!("could not determine listening address: {error}");
+            return 1;
+        }
+    };
+    let access = match access::AccessPolicy::generate(local_address) {
+        Ok(access) => access,
+        Err(error) => {
+            eprintln!("could not generate the local access capability: {error}");
+            return 1;
+        }
+    };
     let runtime = Runtime::new(image);
     let state = app::AppState::new(runtime.clone(), access.clone());
     let router = app::routes(state);
@@ -49,7 +91,9 @@ async fn main() {
     runtime.cleanup().await;
     if let Err(error) = server_result {
         eprintln!("server error: {error}");
+        return 1;
     }
+    0
 }
 
 fn parse_bind(bind: &str) -> Result<SocketAddr, String> {

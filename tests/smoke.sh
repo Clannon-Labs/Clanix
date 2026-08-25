@@ -3,6 +3,7 @@ set -euo pipefail
 
 project_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 bind_address=${CLANNON_SMOKE_BIND:-127.0.0.1:39081}
+server_binary=${CLANNON_SMOKE_BINARY:-}
 base_url=""
 authority=""
 origin=""
@@ -41,8 +42,14 @@ cleanup() {
 trap cleanup EXIT
 
 cd "$project_dir"
-cargo build --quiet
-CLANNON_BIND="$bind_address" target/debug/clannon >"$server_log" 2>&1 &
+if [[ -z "$server_binary" ]]; then
+  cargo build --quiet
+  server_binary="$project_dir/target/debug/clannon"
+elif [[ ! -x "$server_binary" ]]; then
+  printf 'CLANNON_SMOKE_BINARY is not executable: %s\n' "$server_binary" >&2
+  exit 1
+fi
+CLANNON_BIND="$bind_address" "$server_binary" >"$server_log" 2>&1 &
 server_pid=$!
 
 for _ in $(seq 1 120); do

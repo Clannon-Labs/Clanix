@@ -20,13 +20,39 @@ decisions that keep the project small live in [`PROJECT.md`](PROJECT.md).
   and Linux TCP/UDP socket tables.
 - Guest outbound networking is disabled by default; loopback listeners inside
   the disposable container continue to work and appear in evidence.
-- State is deliberately in memory; stopping the server cleans up its containers.
+- State is deliberately in memory; graceful shutdown attempts to clean up every
+  container created by that server process.
 
-## Requirements
+## Release status
 
-- Rust 1.85 or newer (edition 2024)
-- Rootless Podman
-- Internet access on first launch to pull `alpine:3.20`, unless it is cached
+There is no published binary release yet. The first candidate is `v0.1.0`, a
+local alpha for Linux x86-64. Publication is blocked until approved MIT and
+Apache-2.0 license texts and attribution are checked in, third-party distribution
+obligations are reviewed, and GitHub private vulnerability reporting is
+verified. `main` remains development state until those gates and the acceptance
+checklist in [`RELEASING.md`](RELEASING.md) pass.
+
+The planned asset is
+`clannon-v0.1.0-x86_64-unknown-linux-musl.tar.gz` with a companion
+`SHA256SUMS`. It contains one `clannon` executable with the browser assets
+embedded, plus the README, product and security contracts, approved license
+texts, build metadata, and a locked dependency inventory. The inventory is
+not a standards-compliant SBOM or a bundle of third-party license texts.
+
+## Supported local-alpha host
+
+- x86-64 Linux
+- Rootless Podman 5.x; the candidate is currently exercised with Podman 5.8.4
+- A current Chromium-based desktop browser for the supported UI path
+- Internet access on first environment creation to pull `alpine:3.20`, unless
+  that image is already cached
+- `curl`, `sha256sum`, `tar`, and `install`, or equivalent tools, for the
+  documented archive installation
+
+Clannon does not require `sudo`, a system service, or Rust when using the
+release archive. Other architectures, browsers, container engines, package
+managers, and host operating systems are untested and unsupported in the first
+alpha.
 
 Confirm that Podman reports `true`:
 
@@ -34,10 +60,46 @@ Confirm that Podman reports `true`:
 podman info --format '{{.Host.Security.Rootless}}'
 ```
 
+## Install a published alpha
+
+These commands describe the planned `v0.1.0` release and will work only after it
+is published. They intentionally download an exact version rather than a mutable
+“latest” URL:
+
+```sh
+release_version=0.1.0
+release_root="clannon-v${release_version}-x86_64-unknown-linux-musl"
+release_url="https://github.com/Clannon-Labs/Clannon/releases/download/v${release_version}"
+
+curl --fail --location --remote-name "${release_url}/${release_root}.tar.gz"
+curl --fail --location --remote-name "${release_url}/SHA256SUMS"
+sha256sum --check SHA256SUMS
+tar --extract --gzip --file "${release_root}.tar.gz"
+"./${release_root}/clannon" --version
+"./${release_root}/clannon" doctor
+```
+
+Run directly from the extracted directory, or optionally copy the executable to
+a user-owned directory already on `PATH`:
+
+```sh
+mkdir --parents "$HOME/.local/bin"
+install --mode 0755 "./${release_root}/clannon" "$HOME/.local/bin/clannon"
+clannon --version
+clannon doctor
+```
+
+`clannon doctor` checks that the host is Linux, the configured loopback address
+can bind, and Podman is working rootlessly. It does not pull the guest image,
+enforce the supported Podman major version, open a browser, or prove the full
+create-to-destroy path.
+
 ## Run
 
 ```sh
-cargo run
+clannon
+# Equivalent explicit command:
+clannon serve
 ```
 
 Clannon prints a fresh private URL such as
@@ -70,11 +132,19 @@ capture completed. Both tails are lost on destroy or restart. The opaque
 environment ID is an identifier, not a credential; the private URL capability
 is what authorizes local API and terminal access.
 
-The optional settings are intentionally limited:
+The CLI surface is intentionally small:
+
+```text
+clannon [serve|doctor|--version|--help]
+```
+
+`CLANNON_BIND` changes the numeric loopback listen address for `serve` and the
+bind check used by `doctor`. `CLANNON_IMAGE` changes only the guest image used by
+`serve`:
 
 ```sh
-CLANNON_BIND=127.0.0.1:4000 cargo run
-CLANNON_IMAGE=docker.io/library/alpine:3.20 cargo run
+CLANNON_BIND=127.0.0.1:4000 clannon
+CLANNON_IMAGE=docker.io/library/alpine:3.20 clannon
 ```
 
 Only numeric IPv4 or IPv6 loopback bind addresses are supported. Port `0` is
@@ -82,6 +152,49 @@ allowed; Clannon prints the actual selected port in its private URL. API clients
 must use an allowed `Host`, an optional matching HTTP `Origin`, and
 `Authorization: Bearer <capability>`. The terminal WebSocket carries the same
 capability in its `access_token` query parameter.
+
+## Upgrade
+
+Clannon has no automatic updater or persistent environment migration. Stop the
+running process with Ctrl-C and wait for it to exit before replacing the binary;
+all runtime ownership and in-memory Activity/transcript evidence is disposable
+and does not survive the restart. Graceful shutdown attempts to remove the
+containers first. Download the newer exact-version archive and `SHA256SUMS`,
+verify them as above, overwrite only the installed executable, and rerun
+`clannon --version` and `clannon doctor`.
+
+Before 1.0, a new minor version may break the CLI, terminal protocol,
+observation JSON, or disposable runtime behavior. Read that release's notes
+before upgrading. Only the newest tagged local alpha is supported.
+
+## Remove
+
+Stop Clannon with Ctrl-C and wait for graceful cleanup, then remove the exact
+binary you installed:
+
+```sh
+rm -- "$HOME/.local/bin/clannon"
+```
+
+If you ran from an extracted archive, remove that extracted directory yourself
+after confirming its path. Clannon stores no database or system-wide
+configuration. Closing its browser tab clears the tab-scoped capability. Podman
+images remain cached because they may be shared with other tools. After an
+abrupt process or host termination, inspect `podman ps --all` for a confirmed
+Clannon-named container and remove only that exact container explicitly.
+
+## Build from source
+
+Until `v0.1.0` is published, this is the supported developer path. It requires
+Rust 1.85 or newer (edition 2024), the repository checkout, and rootless Podman:
+
+```sh
+cargo run -- doctor
+cargo run
+```
+
+Source builds are development builds, not substitutes for exercising the
+packaged release candidate.
 
 ## Verify
 

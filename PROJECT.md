@@ -100,6 +100,40 @@ Activity and transcript evidence are lost when the environment is destroyed or
 the server restarts. Environment IDs identify runtime objects, but only the
 server capability authorizes access to them.
 
+## Linux local-alpha release contract
+
+Clannon releases use semantic `0.y.z` versions and `v0.y.z` Git tags. Before
+1.0, a minor version may deliberately break the CLI, observation JSON, terminal
+protocol, or disposable runtime behavior. Patch releases preserve that minor
+version's contract unless a security fix makes that unsafe. Only the newest
+tagged local alpha is supported; `main` is development state, not a release.
+
+The first supported distribution is one static-musl x86-64 Linux executable
+with the browser assets embedded. Its versioned release archive and published
+`SHA256SUMS` are the installation boundary. Rootless Podman and a current
+Chromium-based Linux browser remain host dependencies; Clannon does not bundle a
+container engine, install a service, add itself to shell startup, or update
+itself. The default guest image may require a registry pull on first use and is
+not part of the release archive.
+
+Install means verifying an exact-version archive and copying `clannon` to a
+user-owned executable directory. Run means checking the host with `clannon
+doctor`, starting `clannon`, and opening the complete private loopback URL it
+prints. Upgrade means gracefully stopping the old process, accepting loss of all
+disposable environments and in-memory evidence, verifying a newer exact-version
+archive, and replacing the one executable. Remove means stopping Clannon,
+removing that executable, and explicitly inspecting any container left by an
+unclean shutdown; Clannon does not delete Podman images or unrelated containers.
+
+A release is acceptable only when its tag and reported version agree, the locked
+workspace gates and real rootless-Podman smoke pass, the packaged executable is
+exercised through create/terminal/evidence/destroy on the supported host, its
+checksum verifies after download, no Clannon test container remains, and the
+release notes state user-visible changes and known limits. Publication also
+requires checked-in license texts and a working private security-reporting path.
+Exact maintainer steps and stop conditions live in `RELEASING.md`; supported
+security scope lives in `SECURITY.md`.
+
 ## Architecture principles
 
 - **One process, one node, in memory.** The Rust server owns HTTP, WebSockets,

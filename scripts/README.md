@@ -34,3 +34,11 @@ a merge queue; coordinator review remains the integration boundary.
 - `comms/`: concise tracked provenance and durable status.
 
 Templates and lifecycle rules live in the README inside each directory.
+
+## Release candidate tools
+
+`package-release.sh` assembles the locked, versioned musl archive after a
+release binary and the human-approved project license files exist.
+`verify-release.sh` checks the published checksum, exact archive layout,
+reported version, and static linking. The manual GitHub candidate workflow runs
+both scripts but cannot create a tag or release.

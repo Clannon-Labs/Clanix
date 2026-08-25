@@ -70,14 +70,14 @@ impl ObservationState {
             self.processes = Some(current);
         }
 
-        if let Some(files) = &capture.files
-            && files.complete
-        {
-            let current = file_map(&files.files);
-            if let Some(previous) = &self.files {
-                activities.extend(diff_files(capture_sequence, previous, &current));
+        if let Some(files) = &capture.files {
+            if files.complete {
+                let current = file_map(&files.files);
+                if let Some(previous) = &self.files {
+                    activities.extend(diff_files(capture_sequence, previous, &current));
+                }
+                self.files = Some(current);
             }
-            self.files = Some(current);
         }
 
         if let Some(network) = &capture.network {
@@ -455,9 +455,12 @@ fn network_state(code: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Mutex as StdMutex,
-        atomic::{AtomicUsize, Ordering},
+    use std::{
+        fmt::Write as _,
+        sync::{
+            Mutex as StdMutex,
+            atomic::{AtomicUsize, Ordering},
+        },
     };
 
     use tokio::{
@@ -666,9 +669,10 @@ mod tests {
 
     #[test]
     fn file_sample_exposes_two_hundred_but_marks_two_hundred_one_incomplete() {
-        let raw = (0..=MAX_SNAPSHOT_FILES)
-            .map(|index| format!("/workspace/{index:03}|1|1|regular file\n"))
-            .collect::<String>();
+        let mut raw = String::new();
+        for index in 0..=MAX_SNAPSHOT_FILES {
+            writeln!(raw, "/workspace/{index:03}|1|1|regular file").unwrap();
+        }
         let sample = parse_file_sample(&raw);
         assert_eq!(sample.files.len(), MAX_SNAPSHOT_FILES);
         assert!(!sample.complete);

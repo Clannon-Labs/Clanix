@@ -738,10 +738,10 @@ async fn supervise(supervisor: Supervisor, process: SupervisedProcess) {
                     OutputStream::Stdout => stdout_decoder.finish(),
                     OutputStream::Stderr => stderr_decoder.finish(),
                 };
-                if let Some(hub) = hub.upgrade()
-                    && !transcript.is_empty()
-                {
-                    hub.transcript.record("output", transcript).await;
+                if let Some(hub) = hub.upgrade() {
+                    if !transcript.is_empty() {
+                        hub.transcript.record("output", transcript).await;
+                    }
                 }
                 readers_remaining -= 1;
             }
@@ -764,10 +764,10 @@ async fn supervise(supervisor: Supervisor, process: SupervisedProcess) {
     let _ = process_waiter.await;
 
     for transcript in [stdout_decoder.finish(), stderr_decoder.finish()] {
-        if let Some(hub) = hub.upgrade()
-            && !transcript.is_empty()
-        {
-            hub.transcript.record("output", transcript).await;
+        if let Some(hub) = hub.upgrade() {
+            if !transcript.is_empty() {
+                hub.transcript.record("output", transcript).await;
+            }
         }
     }
 

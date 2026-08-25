@@ -312,6 +312,118 @@ const outputTranscript = snapshot.transcript
   .filter((entry) => entry.direction === "output")
   .map((entry) => entry.data)
   .join("");
+const hasExecutionEvents = Array.isArray(snapshot.execution_events);
+const executionEvents = hasExecutionEvents ? snapshot.execution_events : [];
+const executionEventsOmitted = snapshot.execution_events_omitted;
+const eventKeys = {
+  environment_ready: ["sequence", "timestamp_ms", "type"],
+  shell_started: ["columns", "generation", "rows", "sequence", "timestamp_ms", "type"],
+  terminal_input: ["bytes", "generation", "input_kind", "sequence", "timestamp_ms", "type"],
+  terminal_resized: ["columns", "generation", "rows", "sequence", "timestamp_ms", "type"],
+  shell_exited: ["code", "generation", "sequence", "timestamp_ms", "type"],
+  shell_failed: ["generation", "sequence", "timestamp_ms", "type"],
+};
+const hasExactKeys = (value, expected) =>
+  value && typeof value === "object" && !Array.isArray(value) &&
+  JSON.stringify(Object.keys(value).sort()) === JSON.stringify(expected);
+const executionEventShapesAreValid = hasExecutionEvents && executionEvents.every((event) => {
+  const expected = eventKeys[event?.type];
+  if (!expected || !hasExactKeys(event, expected)) return false;
+  if (!Number.isSafeInteger(event.sequence) || event.sequence < 1 ||
+      !Number.isSafeInteger(event.timestamp_ms) || event.timestamp_ms < 1) return false;
+  if (event.type !== "environment_ready" &&
+      (!Number.isSafeInteger(event.generation) || event.generation < 1)) return false;
+  if (event.type === "shell_started" || event.type === "terminal_resized") {
+    return Number.isSafeInteger(event.columns) && event.columns >= 1 && event.columns <= 1000 &&
+      Number.isSafeInteger(event.rows) && event.rows >= 1 && event.rows <= 1000;
+  }
+  if (event.type === "terminal_input") {
+    return ["text", "binary", "interrupt"].includes(event.input_kind) &&
+      Number.isSafeInteger(event.bytes) && event.bytes > 0;
+  }
+  return event.type !== "shell_exited" || event.code === null || Number.isSafeInteger(event.code);
+});
+const executionEventSequencesAreOrdered = hasExecutionEvents && executionEvents.every(
+  (event, index, events) => index === 0 || events[index - 1].sequence < event.sequence,
+);
+const findEventAfter = (after, predicate) => {
+  for (let index = after + 1; index < executionEvents.length; index += 1) {
+    if (predicate(executionEvents[index])) return index;
+  }
+  return -1;
+};
+let activityCursor = findEventAfter(-1, (event) => event.type === "environment_ready");
+const environmentReadyIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "shell_started" && event.generation === 1 &&
+  event.columns === 91 && event.rows === 33
+);
+const firstShellIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "terminal_input" && event.generation === 1 && event.input_kind === "text"
+);
+const firstInputIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "terminal_resized" && event.generation === 1 &&
+  event.columns === 117 && event.rows === 41
+);
+const explicitResizeIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "terminal_input" && event.generation === 1 && event.input_kind === "text" &&
+  event.bytes === Buffer.byteLength("printf 'resized-size:'; stty size\n")
+);
+const resizedProofInputIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "terminal_input" && event.generation === 1 && event.input_kind === "binary" &&
+  event.bytes === Buffer.byteLength("sleep 30\n")
+);
+const binaryInputIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "terminal_input" && event.generation === 1 &&
+  event.input_kind === "interrupt" && event.bytes === 1
+);
+const interruptIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "terminal_input" && event.generation === 1 && event.input_kind === "text" &&
+  event.bytes === Buffer.byteLength("printf 'after-etx:%s:%s\\n' \"$PWD\" \"$CLANNON_SMOKE_VAR\"\n")
+);
+const afterInterruptInputIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "terminal_resized" && event.generation === 1 &&
+  event.columns === 73 && event.rows === 29
+);
+const reconnectResizeIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "terminal_input" && event.generation === 1 && event.input_kind === "text" &&
+  event.bytes === Buffer.byteLength("printf 'reconnect-size:'; stty size\nprintf 'resume-proof:%s:%s\\n' \"$PWD\" \"$CLANNON_SMOKE_VAR\"\n")
+);
+const resumedInputIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "terminal_input" && event.generation === 1 && event.input_kind === "text" &&
+  event.bytes === Buffer.byteLength("exit 7\n")
+);
+const exitInputIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "shell_exited" && event.generation === 1 && event.code === 7
+);
+const firstShellExitIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "shell_started" && event.generation === 2 &&
+  event.columns === 88 && event.rows === 27
+);
+const secondShellIndex = activityCursor;
+activityCursor = findEventAfter(activityCursor, (event) =>
+  event.type === "terminal_input" && event.generation === 2 && event.input_kind === "text" &&
+  event.bytes === Buffer.byteLength("printf 'fresh-proof:%s:%s\\n' \"$PWD\" \"${CLANNON_SMOKE_VAR-unset}\"\n")
+);
+const secondShellInputIndex = activityCursor;
+const activitySemanticsAreValid = executionEventShapesAreValid &&
+  executionEventSequencesAreOrdered && executionEventsOmitted === 0 &&
+  executionEvents[0]?.sequence === 1 && environmentReadyIndex === 0 &&
+  secondShellInputIndex >= 0 &&
+  executionEvents.filter((event) => event.type === "shell_started" && event.generation === 1).length === 1 &&
+  !executionEvents.some((event) => event.type === "shell_exited" && event.generation === 2) &&
+  !executionEvents.some((event) => event.type === "shell_failed");
 const hasProofFile = snapshot.files.some((file) => file.path === "/workspace/proof.txt");
 const hasCommand = inputTranscript.includes("proof.txt");
 const hasDetachedOutput = outputTranscript.includes("detached-proof");
@@ -336,8 +448,28 @@ const hasTcpListener = snapshot.network.some((socket) =>
   socket.local_address === "127.0.0.1:23456" &&
   socket.state === "listening"
 );
-if (!hasProofFile || !hasCommand || !hasDetachedOutput || !hasTtyProof || !hasInitialSize || !hasLoopbackProof || !hasResizeProof || !hasRawEtx || !hasAfterEtxProof || !hasReconnectSize || !hasResumeProof || !hasFreshProof || !timestampsAreValid || !timestampsAreOrdered || !hasSleep || !hasTcpListener) {
+if (!activitySemanticsAreValid || !hasProofFile || !hasCommand || !hasDetachedOutput || !hasTtyProof || !hasInitialSize || !hasLoopbackProof || !hasResizeProof || !hasRawEtx || !hasAfterEtxProof || !hasReconnectSize || !hasResumeProof || !hasFreshProof || !timestampsAreValid || !timestampsAreOrdered || !hasSleep || !hasTcpListener) {
   console.error(JSON.stringify({
+    activitySemanticsAreValid,
+    executionEventShapesAreValid,
+    executionEventSequencesAreOrdered,
+    executionEventsOmitted,
+    activityIndexes: {
+      environmentReadyIndex,
+      firstShellIndex,
+      firstInputIndex,
+      explicitResizeIndex,
+      resizedProofInputIndex,
+      binaryInputIndex,
+      interruptIndex,
+      afterInterruptInputIndex,
+      reconnectResizeIndex,
+      resumedInputIndex,
+      exitInputIndex,
+      firstShellExitIndex,
+      secondShellIndex,
+      secondShellInputIndex,
+    },
     hasProofFile,
     hasCommand,
     hasDetachedOutput,

@@ -1,3 +1,4 @@
+mod activity;
 mod environment;
 mod error;
 mod observation;

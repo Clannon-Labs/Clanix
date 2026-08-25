@@ -18,6 +18,7 @@ use tokio::{
 };
 
 use crate::{
+    activity::{ActivityLog, ExecutionActivity, TerminalInputKind},
     environment::{Environment, Transcript},
     error::{RuntimeError, RuntimeErrorKind},
     podman,
@@ -90,6 +91,7 @@ pub(crate) struct TerminalHub {
 
 struct HubInner {
     transcript: Arc<Transcript>,
+    activity: Arc<ActivityLog>,
     state: std::sync::Mutex<HubState>,
     process_finished: Notify,
 }
@@ -136,6 +138,7 @@ struct SupervisedProcess {
 
 struct Supervisor {
     hub: Weak<HubInner>,
+    activity: Arc<ActivityLog>,
     generation: u64,
     accepting: Arc<AtomicBool>,
     events: broadcast::Sender<TerminalEvent>,
@@ -333,14 +336,28 @@ impl TerminalAttachment {
             .environment
             .as_ref()
             .expect("open terminal attachment owns its environment");
-        let (transcript, bytes) = match input {
-            TerminalInput::Text(text) => (text.clone(), text.into_bytes()),
-            TerminalInput::Binary(bytes) => (String::from_utf8_lossy(&bytes).into_owned(), bytes),
+        let (transcript, bytes, mut input_kind) = match input {
+            TerminalInput::Text(text) => (text.clone(), text.into_bytes(), TerminalInputKind::Text),
+            TerminalInput::Binary(bytes) => (
+                String::from_utf8_lossy(&bytes).into_owned(),
+                bytes,
+                TerminalInputKind::Binary,
+            ),
         };
+        if bytes == [0x03] {
+            input_kind = TerminalInputKind::Interrupt;
+        }
 
         let result = self.stdin.lock().await.write_all(&bytes).await;
         match &result {
-            Ok(()) => environment.record_transcript("input", transcript).await,
+            Ok(()) => {
+                environment.record_activity(ExecutionActivity::TerminalInput {
+                    generation: self.generation,
+                    input_kind,
+                    bytes: bytes.len() as u64,
+                });
+                environment.record_transcript("input", transcript).await;
+            }
             Err(error) => environment.terminal().request_failure(
                 self.generation,
                 format!("could not write terminal input: {error}"),
@@ -388,10 +405,11 @@ impl Drop for TerminalAttachment {
 }
 
 impl TerminalHub {
-    pub(crate) fn new(transcript: Arc<Transcript>) -> Self {
+    pub(crate) fn new(transcript: Arc<Transcript>, activity: Arc<ActivityLog>) -> Self {
         Self {
             inner: Arc::new(HubInner {
                 transcript,
+                activity,
                 state: std::sync::Mutex::new(HubState {
                     next_generation: 1,
                     active: None,
@@ -461,9 +479,15 @@ impl TerminalHub {
             pty_path,
         });
         drop(state);
+        self.inner.activity.record(ExecutionActivity::ShellStarted {
+            generation,
+            columns: dimensions.columns(),
+            rows: dimensions.rows(),
+        });
         handle.spawn(supervise(
             Supervisor {
                 hub: Arc::downgrade(&self.inner),
+                activity: self.inner.activity.clone(),
                 generation,
                 accepting,
                 events,
@@ -542,12 +566,24 @@ impl TerminalHub {
         };
 
         resize(container.to_owned(), pty_path, dimensions).await?;
-        if !self.generation_is_live(generation) {
+        let state = self.inner.state.lock().expect("terminal hub lock poisoned");
+        let generation_is_live = state.active.as_ref().is_some_and(|active| {
+            active.generation == generation && active.accepting.load(Ordering::Acquire)
+        });
+        if !generation_is_live {
             return Err(io::Error::new(
                 io::ErrorKind::NotConnected,
                 "terminal generation ended during resize",
             ));
         }
+        self.inner
+            .activity
+            .record(ExecutionActivity::TerminalResized {
+                generation,
+                columns: dimensions.columns(),
+                rows: dimensions.rows(),
+            });
+        drop(state);
         Ok(())
     }
 
@@ -640,6 +676,7 @@ impl TerminalProcess {
 async fn supervise(supervisor: Supervisor, process: SupervisedProcess) {
     let Supervisor {
         hub,
+        activity,
         generation,
         accepting,
         events,
@@ -741,16 +778,35 @@ async fn supervise(supervisor: Supervisor, process: SupervisedProcess) {
         (None, None) => TerminalEvent::Failed("terminal supervision ended unexpectedly".to_owned()),
     };
     accepting.store(false, Ordering::Release);
-    let _ = events.send(final_event);
-
-    if let Some(hub) = hub.upgrade() {
+    let hub = hub.upgrade();
+    if let Some(hub) = &hub {
         let mut state = hub.state.lock().expect("terminal hub lock poisoned");
+        record_shell_end(&activity, generation, &final_event);
         if state.active.as_ref().map(|active| active.generation) == Some(generation) {
             state.active = None;
         }
         state.processes.remove(&generation);
         drop(state);
+    } else {
+        record_shell_end(&activity, generation, &final_event);
+    }
+    let _ = events.send(final_event);
+
+    if let Some(hub) = hub {
         hub.process_finished.notify_waiters();
+    }
+}
+
+fn record_shell_end(activity: &ActivityLog, generation: u64, final_event: &TerminalEvent) {
+    match final_event {
+        TerminalEvent::Exited { code } => activity.record(ExecutionActivity::ShellExited {
+            generation,
+            code: *code,
+        }),
+        TerminalEvent::Failed(_) => activity.record(ExecutionActivity::ShellFailed { generation }),
+        TerminalEvent::Output(_) | TerminalEvent::OutputGap { .. } => {
+            unreachable!("supervisor final event must end the shell")
+        }
     }
 }
 
@@ -898,6 +954,15 @@ mod tests {
         }
     }
 
+    fn activities(environment: &Environment) -> Vec<ExecutionActivity> {
+        environment
+            .activity_snapshot()
+            .0
+            .into_iter()
+            .map(|event| event.activity)
+            .collect()
+    }
+
     #[test]
     fn terminal_dimensions_enforce_inclusive_bounds() {
         for (columns, rows) in [(1, 1), (1, 1000), (1000, 1), (1000, 1000)] {
@@ -932,6 +997,7 @@ mod tests {
             )
             .await;
         assert!(result.is_err());
+        assert!(activities(&environment).is_empty());
         drop(reservation);
         assert!(reserve(environment).is_ok());
     }
@@ -948,7 +1014,7 @@ mod tests {
         assert_eq!(error.kind(), RuntimeErrorKind::Conflict);
 
         attachment.close().await;
-        let mut reservation = reserve(environment).unwrap();
+        let mut reservation = reserve(environment.clone()).unwrap();
         let (unused_process, _, _) = running_process();
         let attachment = open_process(&mut reservation, unused_process)
             .await
@@ -989,13 +1055,14 @@ mod tests {
         assert!(!first.resumed());
         assert_eq!(spawns.load(Ordering::Relaxed), 1);
         assert_eq!(calls.lock().unwrap().len(), 1);
+        let generation = first.generation;
         drop(first);
 
         let (unused_process, _, _) = running_process();
         let resumed_calls = calls.clone();
         let resumed_spawns = spawns.clone();
         let second_size = TerminalDimensions::new(151, 47).unwrap();
-        let mut reservation = reserve(environment).unwrap();
+        let mut reservation = reserve(environment.clone()).unwrap();
         let mut second = reservation
             .open_with(
                 second_size,
@@ -1027,6 +1094,21 @@ mod tests {
                 .await
                 .is_err(),
             "reattach must not replay output"
+        );
+        assert_eq!(
+            activities(&environment),
+            [
+                ExecutionActivity::ShellStarted {
+                    generation,
+                    columns: first_size.columns(),
+                    rows: first_size.rows(),
+                },
+                ExecutionActivity::TerminalResized {
+                    generation,
+                    columns: second_size.columns(),
+                    rows: second_size.rows(),
+                },
+            ]
         );
     }
 
@@ -1137,6 +1219,14 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.to_string(), "stty rejected resize");
         assert!(environment.transcript_snapshot().await.is_empty());
+        assert_eq!(
+            activities(&environment),
+            [ExecutionActivity::ShellStarted {
+                generation: attachment.generation,
+                columns: dimensions().columns(),
+                rows: dimensions().rows(),
+            }]
+        );
         drop(attachment);
     }
 
@@ -1159,6 +1249,21 @@ mod tests {
         assert_eq!(transcript.len(), 1);
         assert_eq!(transcript[0].direction, "input");
         assert_eq!(transcript[0].data.as_bytes(), [0x03]);
+        assert_eq!(
+            activities(&environment),
+            [
+                ExecutionActivity::ShellStarted {
+                    generation: attachment.generation,
+                    columns: dimensions().columns(),
+                    rows: dimensions().rows(),
+                },
+                ExecutionActivity::TerminalInput {
+                    generation: attachment.generation,
+                    input_kind: TerminalInputKind::Interrupt,
+                    bytes: 1,
+                },
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1177,7 +1282,7 @@ mod tests {
                 }) as ProcessWait
             }),
         };
-        let mut reservation = reserve(environment).unwrap();
+        let mut reservation = reserve(environment.clone()).unwrap();
         let mut attachment = open_process(&mut reservation, process).await.unwrap();
 
         let mut test_stdout = test_stdout;
@@ -1191,6 +1296,20 @@ mod tests {
         assert_eq!(
             attachment.next_event().await,
             Some(TerminalEvent::Exited { code: Some(9) })
+        );
+        assert_eq!(
+            activities(&environment),
+            [
+                ExecutionActivity::ShellStarted {
+                    generation: attachment.generation,
+                    columns: dimensions().columns(),
+                    rows: dimensions().rows(),
+                },
+                ExecutionActivity::ShellExited {
+                    generation: attachment.generation,
+                    code: Some(9),
+                },
+            ]
         );
     }
 
@@ -1376,6 +1495,19 @@ mod tests {
             Some(TerminalEvent::Failed(format!(
                 "could not write terminal input: {write_error}"
             )))
+        );
+        assert_eq!(
+            activities(&environment),
+            [
+                ExecutionActivity::ShellStarted {
+                    generation: attachment.generation,
+                    columns: dimensions().columns(),
+                    rows: dimensions().rows(),
+                },
+                ExecutionActivity::ShellFailed {
+                    generation: attachment.generation,
+                },
+            ]
         );
         drop(attachment);
         timeout(

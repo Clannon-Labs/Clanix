@@ -41,7 +41,7 @@
           <h1 id="intro-title">Run it. Watch what the system does.</h1>
         </div>
         <div class="intro-actions">
-          <p>Start a disposable Linux environment, run ordinary shell commands, then inspect its process, file, network, and transcript evidence.</p>
+          <p>Start a disposable Linux environment, run ordinary shell commands, then inspect its activity, process, file, network, and transcript evidence.</p>
           <div class="buttons">
             <button id="create" class="primary">Create environment</button>
             <button id="destroy" class="quiet" disabled>Destroy</button>
@@ -87,6 +87,10 @@
           </header>
 
           <div id="warnings" class="warnings" hidden></div>
+          <section class="observation" aria-labelledby="execution-title">
+            <h3 id="execution-title">Execution events <span id="execution-count">0</span></h3>
+            <div id="execution-events" class="observation-body execution-body empty" role="region" aria-labelledby="execution-title" tabindex="0">No execution events yet.</div>
+          </section>
           <section class="observation" aria-labelledby="transcript-title">
             <h3 id="transcript-title">Transcript <span id="transcript-count">0</span></h3>
             <div id="transcript" class="observation-body transcript-body empty" role="region" aria-labelledby="transcript-title" tabindex="0">No transcript yet.</div>

@@ -42,8 +42,9 @@ does not call a model or generate explanations.
   container so local listeners still appear in network evidence.
 - The browser terminal drives `/bin/sh` on a real container PTY, including
   initial sizing, later resize controls, and raw control bytes such as Ctrl-C.
-- The observation endpoint returns JSON containing transcript, process, file,
-  and network data gathered from that container.
+- The observation endpoint returns JSON containing a timestamped Activity tail,
+  terminal transcript, and process, file, and network data gathered from that
+  container.
 - **Destroy environment** force-removes the container. Reusing its ID fails.
 - Container names are scoped to Clannon, and shutdown attempts to remove every
   container created by this server process.
@@ -63,8 +64,22 @@ it is intentionally not a screen terminal emulator.
 
 The transcript is a retained newest tail, not an unlimited audit log. It keeps
 at most 500 whole entries and 1 MiB of UTF-8 entry data; the counts shown by the
-browser describe that retained tail. Environment IDs identify runtime objects,
-but only the server capability authorizes access to them.
+browser describe that retained tail.
+
+Activity is a separate retained newest tail of at most 500 fixed-size execution
+events. Its per-environment sequence is the authoritative order; timestamps are
+the host wall-clock time when Clannon observed each fact and are not promised to
+be monotonic. Observation JSON returns that tail as `execution_events` and the
+number of earlier events as `execution_events_omitted`. Its event types are
+`environment_ready`; `shell_started` with generation and dimensions;
+`terminal_input` with generation, `text`, `binary`, or `interrupt` input kind,
+and byte count; `terminal_resized` with generation and dimensions;
+`shell_exited` with generation and nullable shell code; and `shell_failed` with
+generation. Accepted input is not proof that a command executed, and a shell
+exit is not an individual command result. Reattaching a live shell does not
+start a new shell. Activity and transcript evidence are lost when the
+environment is destroyed or the server restarts. Environment IDs identify
+runtime objects, but only the server capability authorizes access to them.
 
 ## Architecture principles
 
@@ -78,8 +93,9 @@ but only the server capability authorizes access to them.
   accounts, or recovery protocol.
 - **Browser code stays dependency-free.** The terminal is deliberately modest;
   richer emulation can be added only when terminal behavior requires it.
-- **Prefer truthful limitations.** A snapshot is not a timeline. Container
-  isolation is not a hardened multi-tenant sandbox.
+- **Prefer truthful limitations.** Activity is a host-observed terminal and
+  shell timeline; process, file, and network evidence remains point-in-time
+  snapshots. Container isolation is not a hardened multi-tenant sandbox.
 
 ## Explicit non-goals
 
@@ -95,6 +111,7 @@ but only the server capability authorizes access to them.
 
 ## Near-term sequence
 
-Only after V0 is proven locally: improve terminal fidelity; add timestamped
-execution events; then consider saved/forked environments. Hosted-product and
-open-source-runtime separation should be designed from evidence, not in advance.
+With terminal fidelity and runtime-known execution events proven locally, next
+add truthfully labeled refresh-sampled process, file, and network changes;
+then consider saved/forked environments. Hosted-product and open-source-runtime
+separation should be designed from evidence, not in advance.

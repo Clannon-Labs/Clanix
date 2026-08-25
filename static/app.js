@@ -20,6 +20,7 @@ const elements = {
 };
 
 const MAX_TERMINAL_OUTPUT_CHARACTERS = 200 * 1024;
+const MAX_VISIBLE_EXECUTION_EVENTS = 100;
 const TERMINAL_OMISSION_MARKER = "[earlier terminal output omitted]\n";
 const TERMINAL_PROTOCOL = "clannon.terminal.v1";
 const TERMINAL_VERSION = 1;
@@ -577,6 +578,7 @@ async function refreshObservations() {
   try {
     const response = await apiFetch(`/api/environments/${environmentId}/observations`);
     const snapshot = await readResponse(response);
+    renderExecutionEvents(snapshot.execution_events, snapshot.execution_events_omitted);
     renderTranscript(snapshot.transcript);
     renderProcesses(snapshot.processes);
     renderFiles(snapshot.files);
@@ -589,6 +591,118 @@ async function refreshObservations() {
   } finally {
     updateEnvironmentControls();
   }
+}
+
+function renderExecutionEvents(executionEvents, runtimeOmitted) {
+  const container = document.querySelector("#execution-events");
+  const visible = executionEvents.slice(-MAX_VISIBLE_EXECUTION_EVENTS);
+  const browserOmitted = executionEvents.length - visible.length;
+  const omittedByRuntime = Number.isSafeInteger(runtimeOmitted) && runtimeOmitted > 0
+    ? runtimeOmitted
+    : 0;
+  document.querySelector("#execution-count").textContent = executionEvents.length;
+  container.classList.toggle("empty", executionEvents.length === 0);
+
+  const omissionNotices = [];
+  if (omittedByRuntime > 0) {
+    omissionNotices.push(
+      `<p class="execution-omission">Runtime omitted ${omittedByRuntime} earlier ${omittedByRuntime === 1 ? "event" : "events"} from this retained tail.</p>`,
+    );
+  }
+  if (browserOmitted > 0) {
+    omissionNotices.push(
+      `<p class="execution-omission">Showing the newest ${visible.length} of ${executionEvents.length} retained events.</p>`,
+    );
+  }
+
+  if (executionEvents.length === 0) {
+    container.innerHTML = `${omissionNotices.join("")}Nothing recorded in this snapshot.`;
+    return;
+  }
+
+  const rows = visible.map((event) => {
+    const presentation = executionEventPresentation(event);
+    const detail = presentation.detail
+      ? `<small>${escapeHtml(makeControlsVisible(presentation.detail))}</small>`
+      : "";
+    return `
+      <li class="evidence-row execution-row" data-outcome="${presentation.outcome}">
+        <span>${renderEvidenceTimestamp(event.timestamp_ms)} · ${escapeHtml(formatExecutionSequence(event.sequence))}</span>
+        <div>
+          <code>${escapeHtml(presentation.label)}</code>
+          ${detail}
+        </div>
+      </li>`;
+  }).join("");
+  container.innerHTML = `${omissionNotices.join("")}<ol class="execution-list" aria-label="Execution events, oldest to newest">${rows}</ol>`;
+}
+
+function executionEventPresentation(event) {
+  const generation = `generation ${executionValue(event.generation)}`;
+  const dimensions = `${executionValue(event.columns)} × ${executionValue(event.rows)}`;
+  switch (event.type) {
+    case "environment_ready":
+      return { label: "Environment ready", detail: "", outcome: "normal" };
+    case "shell_started":
+      return { label: "Shell started", detail: `${generation} · ${dimensions}`, outcome: "normal" };
+    case "terminal_input": {
+      const inputKind = executionValue(event.input_kind);
+      const bytes = formatExecutionBytes(event.bytes);
+      if (event.input_kind === "interrupt") {
+        return { label: "Interrupt sent", detail: `${generation} · ${bytes}`, outcome: "normal" };
+      }
+      return { label: "Input accepted", detail: `${generation} · ${inputKind} · ${bytes}`, outcome: "normal" };
+    }
+    case "terminal_resized":
+      return { label: "Terminal resized", detail: `${generation} · ${dimensions}`, outcome: "normal" };
+    case "shell_exited": {
+      const exit = event.code === null ? "exit code unavailable" : `code ${executionValue(event.code)}`;
+      return { label: "Shell exited", detail: `${generation} · ${exit}`, outcome: "normal" };
+    }
+    case "shell_failed":
+      return { label: "Shell failed", detail: generation, outcome: "failed" };
+    default:
+      return {
+        label: "Unknown event",
+        detail: `type ${executionValue(event.type, "missing")}`,
+        outcome: "unknown",
+      };
+  }
+}
+
+function executionValue(value, fallback = "unknown") {
+  return makeControlsVisible(String(value ?? fallback));
+}
+
+function formatExecutionSequence(sequence) {
+  return Number.isSafeInteger(sequence) && sequence >= 0 ? `#${sequence}` : "#?";
+}
+
+function formatExecutionBytes(bytes) {
+  if (!Number.isSafeInteger(bytes) || bytes < 0) return "unknown byte count";
+  return `${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
+}
+
+function formatEvidenceTimestamp(timestampMs) {
+  const recordedAt = new Date(Number(timestampMs));
+  if (Number.isNaN(recordedAt.getTime())) {
+    return { datetime: "", label: "Unknown time" };
+  }
+  return {
+    datetime: recordedAt.toISOString(),
+    label: recordedAt.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+    }),
+  };
+}
+
+function renderEvidenceTimestamp(timestampMs) {
+  const timestamp = formatEvidenceTimestamp(timestampMs);
+  if (!timestamp.datetime) return timestamp.label;
+  return `<time datetime="${escapeHtml(timestamp.datetime)}" title="${escapeHtml(timestamp.datetime)}">${escapeHtml(timestamp.label)}</time>`;
 }
 
 function renderTranscript(transcript) {
@@ -607,20 +721,10 @@ function renderTranscript(transcript) {
     : "";
   container.innerHTML = omission + visible.map((entry) => {
     const input = entry.direction === "input";
-    const recordedAt = new Date(Number(entry.timestamp_ms));
-    const timestamp = Number.isNaN(recordedAt.getTime())
-      ? "Unknown time"
-      : recordedAt.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        fractionalSecondDigits: 3,
-      });
-    const datetime = Number.isNaN(recordedAt.getTime()) ? "" : recordedAt.toISOString();
     const data = entry.data === "" ? "∅" : makeControlsVisible(String(entry.data));
     return `
       <div class="evidence-row transcript-row" data-direction="${input ? "input" : "output"}">
-        <span><time datetime="${datetime}" title="${datetime}">${escapeHtml(timestamp)}</time> · ${input ? "Input" : "Output"}</span>
+        <span>${renderEvidenceTimestamp(entry.timestamp_ms)} · ${input ? "Input" : "Output"}</span>
         <code>${escapeHtml(data)}</code>
       </div>`;
   }).join("");
@@ -702,12 +806,12 @@ function resetEnvironment() {
   elements.stateDot.classList.remove("running");
   updateEnvironmentControls();
   setTerminalState("disconnected", "No environment is active.");
-  ["transcript", "processes", "files", "network"].forEach((id) => {
+  ["execution-events", "transcript", "processes", "files", "network"].forEach((id) => {
     const container = document.querySelector(`#${id}`);
     container.classList.add("empty");
-    container.textContent = "No snapshot yet.";
+    container.textContent = id === "execution-events" ? "No execution events yet." : "No snapshot yet.";
   });
-  ["transcript-count", "process-count", "file-count", "network-count"].forEach((id) => {
+  ["execution-count", "transcript-count", "process-count", "file-count", "network-count"].forEach((id) => {
     document.querySelector(`#${id}`).textContent = "0";
   });
   elements.snapshotTime.textContent = "Evidence appears after the environment starts.";

@@ -12,6 +12,8 @@ decisions that keep the project small live in [`PROJECT.md`](PROJECT.md).
 - A Rust server creates and destroys rootless Podman containers.
 - A dependency-free browser UI drives a real, resizable container PTY over
   WebSockets, including Ctrl-C and reconnectable shell sessions.
+- Activity shows a timestamped, ordered tail of host-observed environment and
+  shell facts without pretending terminal input is a completed command.
 - Snapshot observations show the terminal transcript, processes, workspace files,
   and Linux TCP/UDP socket tables.
 - Guest outbound networking is disabled by default; loopback listeners inside
@@ -50,14 +52,17 @@ printf 'evidence\n' > note.txt
 sleep 30 &
 ```
 
-Refresh **Evidence** to see the resulting transcript, file, and process snapshot.
-Use **Destroy** when finished.
+Refresh **Evidence** to see Activity, the resulting transcript, and the current
+file and process snapshot. Use **Destroy** when finished.
 
 One server owns at most four environments that are creating, live, or awaiting
 cleanup. Transcript evidence is the newest retained tail, bounded to 500 whole
-entries and 1 MiB of UTF-8 entry data. The opaque environment ID is an
-identifier, not a credential; the private URL capability is what authorizes
-local API and terminal access.
+entries and 1 MiB of UTF-8 entry data. Activity separately keeps the newest 500
+fixed-size events and reports how many earlier events were omitted. Event
+sequence defines order; timestamps are host observation times and may repeat or
+move with the host clock. Both tails are lost on destroy or restart. The opaque
+environment ID is an identifier, not a credential; the private URL capability
+is what authorizes local API and terminal access.
 
 The optional settings are intentionally limited:
 
@@ -81,13 +86,15 @@ cargo test --workspace
 
 Unit tests do not require Podman. The smoke test requires working rootless user
 namespaces and exercises create, PTY sizing and resize, foreground interruption,
-reconnection, observations, destroy, access-gate rejection, and rejection of
-the destroyed ID.
+reconnection, ordered Activity semantics, observations, destroy, access-gate
+rejection, and rejection of the destroyed ID.
 
 ## Current boundaries
 
 This is a truthful V0: the shell runs on a real container PTY, while the browser
 shows a control-safe plain-text log rather than a full screen-terminal emulator.
-Observations are point-in-time snapshots rather than a timeline, and rootless
-Podman is useful isolation but not a hardened hostile multi-tenant security
-boundary. See `PROJECT.md` before widening the scope.
+Activity records accepted input and shell/runtime facts; it does not parse
+commands, infer per-command completion, or connect input causally to output.
+Process, file, and network observations remain point-in-time snapshots rather
+than a timeline. Rootless Podman is useful isolation but not a hardened hostile
+multi-tenant security boundary. See `PROJECT.md` before widening the scope.

@@ -160,12 +160,15 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
 
   const emptySnapshot = snapshotOverride ?? {
     captured_at_ms: 0,
+    execution_events: [],
+    execution_events_omitted: 0,
     files: [],
     network: [],
     processes: [],
     transcript: [],
     warnings: [],
   };
+  const observationResponses = [...(options.observationResponses ?? [])];
   const response = (status, body) => ({
     ok: status >= 200 && status < 300,
     status,
@@ -205,6 +208,10 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
             ? { error: "environment capacity reached" }
             : { id: "env-test" });
         return response(status, body);
+      }
+      if (url.endsWith("/observations") && observationResponses.length) {
+        const next = observationResponses.shift();
+        return response(next.status, next.body);
       }
       if (requestOptions.method === "DELETE" && deferredDestroy) return deferredDestroy;
       return response(200, emptySnapshot);
@@ -315,6 +322,8 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
     documentElement: context.document.documentElement,
     destroy: element("#destroy"),
     environmentId: element("#environment-id"),
+    executionCount: element("#execution-count"),
+    executionEvents: element("#execution-events"),
     fetches,
     form,
     historyCalls,
@@ -341,6 +350,8 @@ async function openTerminal(storedTheme = null, storageFails = false, snapshotOv
     sessionValues,
     transcript: element("#transcript"),
     transcriptCount: element("#transcript-count"),
+    snapshotTime: element("#snapshot-time"),
+    warnings: element("#warnings"),
     flushAnimationFrames() {
       while (animationFrames.length) animationFrames.shift()();
     },
@@ -787,6 +798,8 @@ test("projects fragmented CR, CSI, OSC, ESC, UTF-8, and controls as safe plain t
 test("renders bidi formatting controls visibly in live output and transcript evidence", async () => {
   const terminal = await openTerminal(null, false, {
     captured_at_ms: 1_700_000_001_000,
+    execution_events: [],
+    execution_events_omitted: 0,
     files: [],
     network: [],
     processes: [],
@@ -1064,7 +1077,115 @@ test("keeps the system and native theme-control contracts", () => {
   }
   assert.match(html, /<button id="interrupt"[^>]*aria-label="Send Ctrl-C to the running shell"[^>]*disabled>Ctrl-C<\/button>/);
   assert.match(html, /Live \/ PTY · plain text/);
+  assert.ok(html.indexOf('id="execution-events"') < html.indexOf('id="transcript"'));
+  assert.match(html, /id="execution-events"[^>]*role="region"[^>]*aria-labelledby="execution-title"[^>]*tabindex="0"/);
+  assert.match(styles, /\.observation-body:focus-visible/);
   assert.match(styles, /@media \(prefers-color-scheme: dark\) {[\s\S]*:root:not\(\[data-theme\]\)/);
+});
+
+test("renders authoritative execution events in retained order", async () => {
+  const executionEvents = [
+    { sequence: 20, timestamp_ms: 1_700_000_000_020, type: "environment_ready" },
+    { sequence: 21, timestamp_ms: 1_700_000_000_010, type: "shell_started", generation: 2, columns: 91, rows: 33 },
+    { sequence: 22, timestamp_ms: 1_700_000_000_022, type: "terminal_input", generation: 2, input_kind: "text", bytes: 12 },
+    { sequence: 23, timestamp_ms: 1_700_000_000_023, type: "terminal_input", generation: 2, input_kind: "binary", bytes: 4 },
+    { sequence: 24, timestamp_ms: 1_700_000_000_024, type: "terminal_input", generation: 2, input_kind: "interrupt", bytes: 1 },
+    { sequence: 25, timestamp_ms: 1_700_000_000_025, type: "terminal_resized", generation: 2, columns: 117, rows: 41 },
+    { sequence: 26, timestamp_ms: 1_700_000_000_026, type: "shell_exited", generation: 2, code: 7 },
+    { sequence: 27, timestamp_ms: 1_700_000_000_027, type: "shell_exited", generation: 2, code: null },
+    { sequence: 28, timestamp_ms: 1_700_000_000_028, type: "shell_failed", generation: 4 },
+  ];
+  const terminal = await openTerminal(null, false, {
+    captured_at_ms: 1_700_000_001_000,
+    execution_events: executionEvents,
+    execution_events_omitted: 0,
+    files: [],
+    network: [],
+    processes: [],
+    transcript: [],
+    warnings: [],
+  });
+
+  assert.equal(terminal.executionCount.textContent, executionEvents.length);
+  assert.equal((terminal.executionEvents.innerHTML.match(/class="evidence-row execution-row"/g) ?? []).length, executionEvents.length);
+  assert.match(terminal.executionEvents.innerHTML, /<time datetime="2023-/);
+  assert.match(terminal.executionEvents.innerHTML, /generation 2 · 91 × 33/);
+  assert.match(terminal.executionEvents.innerHTML, /Input accepted<\/code>[\s\S]*generation 2 · text · 12 bytes/);
+  assert.match(terminal.executionEvents.innerHTML, /Input accepted<\/code>[\s\S]*generation 2 · binary · 4 bytes/);
+  assert.match(terminal.executionEvents.innerHTML, /Interrupt sent<\/code>[\s\S]*generation 2 · 1 byte/);
+  assert.match(terminal.executionEvents.innerHTML, /Terminal resized<\/code>[\s\S]*generation 2 · 117 × 41/);
+  assert.match(terminal.executionEvents.innerHTML, /Shell exited<\/code>[\s\S]*generation 2 · code 7/);
+  assert.match(terminal.executionEvents.innerHTML, /generation 2 · exit code unavailable/);
+  assert.match(terminal.executionEvents.innerHTML, /data-outcome="failed"[\s\S]*Shell failed<\/code>[\s\S]*generation 4/);
+  assert.ok(terminal.executionEvents.innerHTML.indexOf("Environment ready") < terminal.executionEvents.innerHTML.indexOf("Shell started"));
+  assert.doesNotMatch(terminal.executionEvents.innerHTML, /command (ran|completed)/i);
+});
+
+test("shows runtime and browser omissions while safely preserving unknown events", async () => {
+  const executionEvents = Array.from({ length: 102 }, (_, index) => ({
+    sequence: index,
+    timestamp_ms: 1_700_000_000_000 + index,
+    type: index === 101 ? "<img src=x>\u202E" : "environment_ready",
+  }));
+  const terminal = await openTerminal(null, false, {
+    captured_at_ms: 1_700_000_001_000,
+    execution_events: executionEvents,
+    execution_events_omitted: 7,
+    files: [],
+    network: [],
+    processes: [],
+    transcript: [],
+    warnings: [],
+  });
+
+  assert.equal(terminal.executionCount.textContent, 102);
+  assert.match(terminal.executionEvents.innerHTML, /Runtime omitted 7 earlier events from this retained tail/);
+  assert.match(terminal.executionEvents.innerHTML, /Showing the newest 100 of 102 retained events/);
+  assert.equal((terminal.executionEvents.innerHTML.match(/class="evidence-row execution-row"/g) ?? []).length, 100);
+  assert.doesNotMatch(terminal.executionEvents.innerHTML, /· #0<\/span>|· #1<\/span>/);
+  assert.match(terminal.executionEvents.innerHTML, /· #101<\/span>/);
+  assert.match(terminal.executionEvents.innerHTML, /Unknown event/);
+  assert.match(terminal.executionEvents.innerHTML, /type &lt;img src=x&gt;\[U\+202E\]/);
+  assert.doesNotMatch(terminal.executionEvents.innerHTML, /<img|\u202e/i);
+});
+
+test("uses explicit execution empty and reset states", async () => {
+  const terminal = await openTerminal();
+
+  assert.equal(terminal.executionCount.textContent, 0);
+  assert.equal(terminal.executionEvents.innerHTML, "Nothing recorded in this snapshot.");
+
+  await terminal.destroy.dispatch("click");
+  assert.equal(terminal.executionCount.textContent, "0");
+  assert.equal(terminal.executionEvents.textContent, "No execution events yet.");
+});
+
+test("preserves execution evidence when a later refresh fails", async () => {
+  const snapshot = {
+    captured_at_ms: 1_700_000_001_000,
+    execution_events: [{ sequence: 1, timestamp_ms: 1_700_000_000_000, type: "environment_ready" }],
+    execution_events_omitted: 0,
+    files: [],
+    network: [],
+    processes: [],
+    transcript: [],
+    warnings: [],
+  };
+  const terminal = await openTerminal(null, false, null, {
+    observationResponses: [
+      { status: 200, body: snapshot },
+      { status: 502, body: { error: "observation unavailable" } },
+    ],
+  });
+  const renderedEvents = terminal.executionEvents.innerHTML;
+  const capturedAt = terminal.snapshotTime.textContent;
+
+  await terminal.refresh.dispatch("click");
+
+  assert.equal(terminal.executionEvents.innerHTML, renderedEvents);
+  assert.equal(terminal.executionCount.textContent, 1);
+  assert.equal(terminal.snapshotTime.textContent, capturedAt);
+  assert.match(terminal.warnings.textContent, /observation unavailable/);
 });
 
 test("renders timestamped transcript evidence without trusting its HTML", async () => {
@@ -1075,6 +1196,8 @@ test("renders timestamped transcript evidence without trusting its HTML", async 
   }));
   const terminal = await openTerminal(null, false, {
     captured_at_ms: 1_700_000_001_000,
+    execution_events: [],
+    execution_events_omitted: 0,
     files: [],
     network: [],
     processes: [],

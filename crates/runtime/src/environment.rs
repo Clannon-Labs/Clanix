@@ -15,6 +15,7 @@ use tokio::{
 };
 
 use crate::{
+    activity::{ActivityLog, ExecutionActivity},
     error::{RuntimeError, RuntimeErrorKind},
     observation::{self, ObservationSnapshot},
     podman,
@@ -64,6 +65,7 @@ pub(crate) struct Environment {
     id: String,
     container_name: String,
     transcript: Arc<Transcript>,
+    activity: Arc<ActivityLog>,
     terminal_active: AtomicBool,
     terminal: terminal::TerminalHub,
     slot: StdMutex<Option<OwnedSemaphorePermit>>,
@@ -388,6 +390,7 @@ async fn finish_create<Create, CreateFuture, Remove, RemoveFuture>(
     }
 
     let environment = new_environment(id.clone(), container_name, slot);
+    environment.record_activity(ExecutionActivity::EnvironmentReady);
     if result_sender.is_closed() {
         clean_unpublished_environment(inner, environment, remove_container).await;
         return;
@@ -473,12 +476,14 @@ fn new_environment(
     slot: OwnedSemaphorePermit,
 ) -> Arc<Environment> {
     let transcript = Arc::new(Transcript::new());
+    let activity = Arc::new(ActivityLog::new());
     Arc::new(Environment {
         id,
         container_name,
         transcript: transcript.clone(),
+        activity: activity.clone(),
         terminal_active: AtomicBool::new(false),
-        terminal: terminal::TerminalHub::new(transcript),
+        terminal: terminal::TerminalHub::new(transcript, activity),
         slot: StdMutex::new(Some(slot)),
     })
 }
@@ -538,12 +543,14 @@ impl Environment {
     #[cfg(test)]
     pub(crate) fn for_test() -> Arc<Self> {
         let transcript = Arc::new(Transcript::new());
+        let activity = Arc::new(ActivityLog::new());
         Arc::new(Self {
             id: "test".into(),
             container_name: "none".into(),
             transcript: transcript.clone(),
+            activity: activity.clone(),
             terminal_active: AtomicBool::new(false),
-            terminal: terminal::TerminalHub::new(transcript),
+            terminal: terminal::TerminalHub::new(transcript, activity),
             slot: StdMutex::new(None),
         })
     }
@@ -575,6 +582,14 @@ impl Environment {
 
     pub(crate) async fn record_transcript(&self, direction: &'static str, data: String) {
         self.transcript.record(direction, data).await;
+    }
+
+    pub(crate) fn record_activity(&self, activity: ExecutionActivity) {
+        self.activity.record(activity);
+    }
+
+    pub(crate) fn activity_snapshot(&self) -> (Vec<crate::activity::ExecutionEvent>, u64) {
+        self.activity.snapshot()
     }
 
     pub(crate) fn terminal(&self) -> &terminal::TerminalHub {
@@ -667,12 +682,14 @@ mod tests {
         drop(slots.pop());
         let released_after_create_failure = runtime.acquire_environment_slot().unwrap();
         let transcript = Arc::new(Transcript::new());
+        let activity = Arc::new(ActivityLog::new());
         let environment = Environment {
             id: "test".into(),
             container_name: "none".into(),
             transcript: transcript.clone(),
+            activity: activity.clone(),
             terminal_active: AtomicBool::new(false),
-            terminal: terminal::TerminalHub::new(transcript),
+            terminal: terminal::TerminalHub::new(transcript, activity),
             slot: StdMutex::new(Some(released_after_create_failure)),
         };
         environment.release_slot();
@@ -722,6 +739,24 @@ mod tests {
 
         let entries = transcript.snapshot().await;
         assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn successful_create_records_ready_before_delivery() {
+        let runtime = Runtime::new("unused".into());
+        let id = runtime
+            .create_with(|_, _| async { Ok(()) }, |_| async { Ok(()) })
+            .await
+            .unwrap();
+
+        let environment = runtime.find(&id).await.unwrap();
+        let (events, omitted) = environment.activity_snapshot();
+        assert_eq!(omitted, 0);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].sequence, 1);
+        assert_eq!(events[0].activity, ExecutionActivity::EnvironmentReady);
+
+        runtime.cleanup_with(|_| async { Ok(()) }).await;
     }
 
     #[tokio::test]
@@ -879,7 +914,19 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.kind(), RuntimeErrorKind::BadGateway);
-        assert_eq!(runtime.inner.environments.lock().await.len(), 1);
+        let environments = runtime.inner.environments.lock().await;
+        assert_eq!(environments.len(), 1);
+        assert!(
+            environments
+                .values()
+                .next()
+                .unwrap()
+                .activity_snapshot()
+                .0
+                .is_empty(),
+            "an unknown failed create is not evidence that the environment became ready"
+        );
+        drop(environments);
         assert_eq!(runtime.inner.environment_slots.available_permits(), 3);
         assert_eq!(
             runtime.inner.issued_environment_ids.lock().unwrap().len(),

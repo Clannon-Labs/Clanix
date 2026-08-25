@@ -3,6 +3,7 @@ use std::{net::Ipv6Addr, sync::Arc};
 use serde::Serialize;
 
 use crate::{
+    activity::ExecutionEvent,
     environment::{Environment, TranscriptEntry, now_ms},
     podman,
 };
@@ -11,6 +12,8 @@ use crate::{
 pub struct ObservationSnapshot {
     environment_id: String,
     captured_at_ms: u128,
+    execution_events: Vec<ExecutionEvent>,
+    execution_events_omitted: u64,
     transcript: Vec<TranscriptEntry>,
     processes: Vec<ProcessObservation>,
     files: Vec<FileObservation>,
@@ -78,10 +81,13 @@ pub(crate) async fn collect(environment: Arc<Environment>) -> ObservationSnapsho
         }
     };
     let transcript = environment.transcript_snapshot().await;
+    let (execution_events, execution_events_omitted) = environment.activity_snapshot();
 
     ObservationSnapshot {
         environment_id: environment.id().to_owned(),
         captured_at_ms: now_ms(),
+        execution_events,
+        execution_events_omitted,
         transcript,
         processes,
         files,

@@ -17,6 +17,9 @@ const elements = {
   snapshotTime: document.querySelector("#snapshot-time"),
 };
 
+const MAX_TERMINAL_OUTPUT_CHARACTERS = 200 * 1024;
+const TERMINAL_OMISSION_MARKER = "[earlier terminal output omitted]\n";
+
 let environmentId = null;
 let socket = null;
 let terminalState = "disconnected";
@@ -179,6 +182,7 @@ async function refreshObservations() {
   try {
     const response = await fetch(`/api/environments/${environmentId}/observations`);
     const snapshot = await readResponse(response);
+    renderTranscript(snapshot.transcript);
     renderProcesses(snapshot.processes);
     renderFiles(snapshot.files);
     renderNetwork(snapshot.network);
@@ -189,6 +193,41 @@ async function refreshObservations() {
   } finally {
     updateEnvironmentControls();
   }
+}
+
+function renderTranscript(transcript) {
+  const container = document.querySelector("#transcript");
+  const visible = transcript.slice(-100);
+  const omitted = transcript.length - visible.length;
+  document.querySelector("#transcript-count").textContent = transcript.length;
+  container.classList.toggle("empty", transcript.length === 0);
+  if (transcript.length === 0) {
+    container.textContent = "Nothing recorded in this snapshot.";
+    return;
+  }
+
+  const omission = omitted > 0
+    ? `<p class="transcript-omission">Showing the newest ${visible.length} of ${transcript.length} events.</p>`
+    : "";
+  container.innerHTML = omission + visible.map((entry) => {
+    const input = entry.direction === "input";
+    const recordedAt = new Date(Number(entry.timestamp_ms));
+    const timestamp = Number.isNaN(recordedAt.getTime())
+      ? "Unknown time"
+      : recordedAt.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        fractionalSecondDigits: 3,
+      });
+    const datetime = Number.isNaN(recordedAt.getTime()) ? "" : recordedAt.toISOString();
+    const data = entry.data === "" ? "∅" : String(entry.data);
+    return `
+      <div class="evidence-row transcript-row" data-direction="${input ? "input" : "output"}">
+        <span><time datetime="${datetime}" title="${datetime}">${escapeHtml(timestamp)}</time> · ${input ? "Command" : "Output"}</span>
+        <code>${escapeHtml(data)}</code>
+      </div>`;
+  }).join("");
 }
 
 async function destroyEnvironment() {
@@ -261,12 +300,12 @@ function resetEnvironment() {
   elements.stateDot.classList.remove("running");
   updateEnvironmentControls();
   setTerminalState("disconnected");
-  ["processes", "files", "network"].forEach((id) => {
+  ["transcript", "processes", "files", "network"].forEach((id) => {
     const container = document.querySelector(`#${id}`);
     container.classList.add("empty");
     container.textContent = "No snapshot yet.";
   });
-  ["process-count", "file-count", "network-count"].forEach((id) => {
+  ["transcript-count", "process-count", "file-count", "network-count"].forEach((id) => {
     document.querySelector(`#${id}`).textContent = "0";
   });
   elements.snapshotTime.textContent = "Evidence appears after the environment starts.";
@@ -308,7 +347,21 @@ function setBusy(busy, label = "") {
 }
 
 function appendOutput(text) {
-  elements.output.textContent += text;
+  const alreadyOmitted = elements.output.textContent.startsWith(TERMINAL_OMISSION_MARKER);
+  const current = alreadyOmitted
+    ? elements.output.textContent.slice(TERMINAL_OMISSION_MARKER.length)
+    : elements.output.textContent;
+  let next = current + text;
+  let omitted = alreadyOmitted;
+  if (next.length > MAX_TERMINAL_OUTPUT_CHARACTERS) {
+    omitted = true;
+    next = next.slice(-MAX_TERMINAL_OUTPUT_CHARACTERS);
+    const firstNewline = next.indexOf("\n");
+    if (firstNewline >= 0 && firstNewline < 4096) {
+      next = next.slice(firstNewline + 1);
+    }
+  }
+  elements.output.textContent = `${omitted ? TERMINAL_OMISSION_MARKER : ""}${next}`;
   elements.output.scrollTop = elements.output.scrollHeight;
 }
 

@@ -77,14 +77,30 @@ const fs = require("node:fs");
 const snapshot = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const hasProofFile = snapshot.files.some((file) => file.path === "/workspace/proof.txt");
 const hasCommand = snapshot.transcript.some((entry) => entry.direction === "input" && entry.data.includes("proof.txt"));
+const hasOutput = snapshot.transcript.some((entry) => entry.direction === "output" && entry.data.includes("command-finished"));
+const timestampsAreValid = snapshot.transcript.every((entry) =>
+  Number.isSafeInteger(entry.timestamp_ms) && entry.timestamp_ms > 0
+);
+const timestampsAreOrdered = snapshot.transcript.every((entry, index, entries) =>
+  index === 0 || entries[index - 1].timestamp_ms <= entry.timestamp_ms
+);
 const hasSleep = snapshot.processes.some((process) => process.command === "sleep");
 const hasTcpListener = snapshot.network.some((socket) =>
   socket.protocol === "tcp" &&
   socket.local_address === "0.0.0.0:23456" &&
   socket.state === "listening"
 );
-if (!hasProofFile || !hasCommand || !hasSleep || !hasTcpListener) {
-  console.error(JSON.stringify({ hasProofFile, hasCommand, hasSleep, hasTcpListener, snapshot }, null, 2));
+if (!hasProofFile || !hasCommand || !hasOutput || !timestampsAreValid || !timestampsAreOrdered || !hasSleep || !hasTcpListener) {
+  console.error(JSON.stringify({
+    hasProofFile,
+    hasCommand,
+    hasOutput,
+    timestampsAreValid,
+    timestampsAreOrdered,
+    hasSleep,
+    hasTcpListener,
+    snapshot,
+  }, null, 2));
   process.exit(1);
 }
 NODE

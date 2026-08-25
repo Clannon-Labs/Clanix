@@ -33,7 +33,7 @@ function createElement(textContent = "") {
   };
 }
 
-async function openTerminal(storedTheme = null, storageFails = false) {
+async function openTerminal(storedTheme = null, storageFails = false, snapshotOverride = null) {
   const elements = new Map();
   const element = (selector, text = "") => {
     if (!elements.has(selector)) elements.set(selector, createElement(text));
@@ -79,13 +79,18 @@ async function openTerminal(storedTheme = null, storageFails = false) {
       this.readyState = 3;
       this.listeners.get("close")?.();
     }
+
+    message(data) {
+      this.listeners.get("message")?.({ data });
+    }
   }
 
-  const emptySnapshot = {
+  const emptySnapshot = snapshotOverride ?? {
     captured_at_ms: 0,
     files: [],
     network: [],
     processes: [],
+    transcript: [],
     warnings: [],
   };
   const response = (status, body) => ({
@@ -139,6 +144,8 @@ async function openTerminal(storedTheme = null, storageFails = false) {
     prompt: element("#command-prompt"),
     socket: sockets[0],
     storedValues,
+    transcript: element("#transcript"),
+    transcriptCount: element("#transcript-count"),
   };
 }
 
@@ -279,4 +286,40 @@ test("keeps the system and native theme-control contracts", () => {
     assert.match(html, new RegExp(`<option value="${theme}">`, "i"));
   }
   assert.match(styles, /@media \(prefers-color-scheme: dark\) {[\s\S]*:root:not\(\[data-theme\]\)/);
+});
+
+test("renders timestamped transcript evidence without trusting its HTML", async () => {
+  const transcript = Array.from({ length: 102 }, (_, index) => ({
+    timestamp_ms: 1_700_000_000_000 + index,
+    direction: index === 101 ? "input" : "output",
+    data: index === 101 ? "printf '<script>&\\n'\n" : `output ${index}\n`,
+  }));
+  const terminal = await openTerminal(null, false, {
+    captured_at_ms: 1_700_000_001_000,
+    files: [],
+    network: [],
+    processes: [],
+    transcript,
+    warnings: [],
+  });
+
+  assert.equal(terminal.transcriptCount.textContent, 102);
+  assert.match(terminal.transcript.innerHTML, /Showing the newest 100 of 102 events/);
+  assert.equal((terminal.transcript.innerHTML.match(/class="evidence-row transcript-row"/g) ?? []).length, 100);
+  assert.match(terminal.transcript.innerHTML, /<time datetime="2023-/);
+  assert.match(terminal.transcript.innerHTML, /Command<\/span>/);
+  assert.match(terminal.transcript.innerHTML, /&lt;script&gt;&amp;\\n/);
+  assert.ok(terminal.transcript.innerHTML.includes("printf &#039;&lt;script&gt;&amp;\\n&#039;\n</code>"));
+  assert.doesNotMatch(terminal.transcript.innerHTML, /<script>/);
+});
+
+test("bounds live terminal output while preserving its newest tail", async () => {
+  const terminal = await openTerminal();
+  terminal.socket.message(`${"old ".repeat(60_000)}\nnewest-tail`);
+  terminal.socket.message("-still-visible");
+
+  assert.match(terminal.output.textContent, /^\[earlier terminal output omitted\]\n/);
+  assert.match(terminal.output.textContent, /newest-tail-still-visible$/);
+  assert.equal((terminal.output.textContent.match(/earlier terminal output omitted/g) ?? []).length, 1);
+  assert.ok(terminal.output.textContent.length < 201 * 1024);
 });

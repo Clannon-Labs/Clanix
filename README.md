@@ -46,8 +46,8 @@ not a standards-compliant SBOM or a bundle of third-party license texts.
 - x86-64 Linux
 - Rootless Podman 5.x; the candidate is currently exercised with Podman 5.8.4
 - A current Chromium-based desktop browser for the supported UI path
-- Internet access on first environment creation to pull `alpine:3.20`, unless
-  that image is already cached
+- Internet access on first environment creation to pull Clannon's immutable
+  Alpine 3.24.1 image, unless that image is already cached
 - `curl`, `sha256sum`, `tar`, and `install`, or equivalent tools, for the
   documented archive installation
 
@@ -168,7 +168,7 @@ bind check used by `doctor`. `CLANNON_IMAGE` changes only the guest image used b
 
 ```sh
 CLANNON_BIND=127.0.0.1:4000 clannon
-CLANNON_IMAGE=docker.io/library/alpine:3.20 clannon
+CLANNON_IMAGE=docker.io/library/alpine:3.24 clannon
 ```
 
 A custom guest image remains an expert option, not a compatibility promise. It

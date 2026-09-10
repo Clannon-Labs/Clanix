@@ -1,6 +1,6 @@
-# Clannon
+# Clanix
 
-Clannon is a small local workbench for running commands inside a disposable
+Clanix is a small local workbench for running commands inside a disposable
 Linux container and inspecting what actually happened.
 
 This repository is the first hosted-product slice, not a production sandbox and

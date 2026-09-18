@@ -1,0 +1,3 @@
+
+Wrote Hey from clanix cli to "test2.txt"
+Verbose: false

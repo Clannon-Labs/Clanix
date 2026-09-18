@@ -1,10 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::{
     path::PathBuf, 
-    fs::{
-        self,
-        File,
-    },
+    fs,
 };
 
 #[derive(Parser, Debug)]
@@ -17,6 +14,9 @@ struct CliInput {
 
     #[arg(short, long)]
     verbose: bool,
+
+    #[arg(short, long)]
+    output: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -29,27 +29,57 @@ enum Commands {
     Test,
 
     Write {
-        path: PathBuf,
-
         content: String,
+
+        path: PathBuf,
     }
 }
 
 fn main() {
-    let CliInput {command, verbose} = CliInput::parse();
+    let CliInput {command, verbose, output} = CliInput::parse();
 
     match command {
         Commands::Run {program, args} => {
-            println!("\nProgram: {}\nArgs: {:?}\nVerbose: {}", program, args, verbose)
+            let content = format!("\nProgram: {program}\nArgs: {args:?}\nVerbose: {verbose}");
+            match output {
+                Some(output) => {
+                    fs::write(&output, &content).unwrap()
+                },
+                None => {
+                    println!("{}", content)
+                }
+            }
         },
         Commands::Test => {
-            println!("\nRunning tests\nVerbose: {}", verbose)
+            let content = format!("\nRan tests\nVerbose: {verbose}");
+            match output {
+                Some(output) => {
+                    fs::write(&output, &content).unwrap()
+                },
+                None => {
+                    println!("{}", content)
+                }
+            }
         },
         Commands::Write {path, content} => {
-            File::create(&path).unwrap();
-            fs::write(&path, &content).unwrap();
-            println!("\nWrote {} to {:?}\nVerbose: {}", content, path, verbose)
+            /*
+             * Write content to the given file inside Write
+             * and result to the given output
+             */
+
+            
+            let result = format!("\nWrote {content} to {path:?}\nVerbose: {verbose}");
+            match output {
+                Some(output) => {
+                    // Write the function result to output path
+                    fs::write(&output, &result).unwrap();
+                    // Write the content to the given file
+                    fs::write(&path, &content).unwrap()
+                },
+                None => {
+                    println!("{}", result)
+                }
+            }
         }
     }
-
 }

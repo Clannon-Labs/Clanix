@@ -1,0 +1,1 @@
+Command: 'cargo new project' ran successfully!

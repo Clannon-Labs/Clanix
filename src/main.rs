@@ -1,28 +1,55 @@
 use clap::{Parser, Subcommand};
+use std::{
+    path::PathBuf, 
+    fs::{
+        self,
+        File,
+    },
+};
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(name = "clanix")]
+#[command(version)]
+#[command(about = "A fast developer execution tool")]
 struct CliInput {
     #[command(subcommand)]
     command: Commands,
+
+    #[arg(short, long)]
+    verbose: bool,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum Commands {
     Run {
-        project: String,
+        program: String,
 
-        #[arg(long, short, default_value_t=false)]
-        snapshot: bool,
+        args: Vec<String>,
     },
+    Test,
+
+    Write {
+        path: PathBuf,
+
+        content: String,
+    }
 }
 
 fn main() {
-    let input = CliInput::parse();
+    let CliInput {command, verbose} = CliInput::parse();
 
-    match input.command {
-        Commands::Run {project, snapshot} => {
-            println!("\nRunning project: {}\nsnapshot: {:?}\n", project, snapshot);
+    match command {
+        Commands::Run {program, args} => {
+            println!("\nProgram: {}\nArgs: {:?}\nVerbose: {}", program, args, verbose)
+        },
+        Commands::Test => {
+            println!("\nRunning tests\nVerbose: {}", verbose)
+        },
+        Commands::Write {path, content} => {
+            File::create(&path).unwrap();
+            fs::write(&path, &content).unwrap();
+            println!("\nWrote {} to {:?}\nVerbose: {}", content, path, verbose)
         }
     }
+
 }

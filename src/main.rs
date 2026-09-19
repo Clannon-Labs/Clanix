@@ -18,7 +18,7 @@ struct CliInput {
     #[arg(short, long)]
     verbose: bool,
 
-    #[arg(short, long)]
+    #[arg(short = 's', long = "save")]
     save: Option<PathBuf>, // Use -s filename to save output to a file
 
     #[arg(
@@ -33,10 +33,16 @@ struct CliInput {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    Run { program: String, args: Vec<String> },
+    Run { 
+        program: String,
+        args: Vec<String>
+    },
     Test,
 
-    Write { content: String, path: PathBuf },
+    Write {
+        content: String,
+        path: PathBuf
+    },
 }
 
 #[derive(Debug, Clone, ValueEnum, Serialize, Deserialize)]
@@ -72,7 +78,8 @@ fn main() {
     match command {
         Commands::Run { program, args } => {
             let raw_result = Command::new(&program).args(&args).output().unwrap(); // Replace this later
-
+            // println!("Raw result: {:?}", raw_result);
+            
             let args = args.join(" ");
 
             // We display stdout incase of success and stderr incase of failure
@@ -80,24 +87,25 @@ fn main() {
                 let output = String::from_utf8_lossy(&raw_result.stdout);
 
                 if verbose {
-                    let message =
-                        format!("{NAME}: Command {program} {args:?} was ran successfully!\n");
-                    result.stdout = format!("{message}: {output}");
-                    println!("{}", output);
-                } else {
+                    let message = format!("{NAME}: Command {program} {args} was ran successfully!\n\n");
                     result.stdout = output.clone().into_owned();
-                    println!("{}", &output);
+                    println!("{message} {output}");
+                } else {
+                    let message = format!("{NAME}: {program} {args} was successful!\n\n");
+                    result.stdout = output.clone().into_owned();
+                    println!("{message} {output}");
                 }
             } else {
-                let output = String::from_utf8_lossy(&raw_result.stderr).into_owned();
+                let output = String::from_utf8_lossy(&raw_result.stderr);
 
                 if verbose {
-                    let message = format!("{NAME}: Command {program} {args:?} failed!\n");
-                    result.stderr = format!("{message}: {output}");
-                    println!("{:?}", &raw_result.stderr);
+                    let message = format!("{NAME}: Command {program} {args} failed!\n\n");
+                    result.stderr = output.clone().into_owned();
+                    eprintln!("{message} {output}");
                 } else {
-                    result.stderr = output;
-                    println!("{:?}", &raw_result.stderr);
+                    let message = format!("{NAME}: {program} {args} failed!\n\n");
+                    result.stderr = output.clone().into_owned();
+                    eprintln!("{message} {output}");
                 }
             }
 

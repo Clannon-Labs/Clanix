@@ -6,3 +6,5 @@ test*.*
 /prj/
 /project*/
 output*.*
+
+build.sh

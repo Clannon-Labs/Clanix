@@ -18,13 +18,13 @@ struct CliInput {
     #[arg(short, long)]
     verbose: bool,
 
-    #[arg(short = 's', long = "save")]
-    save: Option<PathBuf>, // Use -s filename to save output to a file
+    #[arg(short, long)]
+    snapshot: Option<PathBuf>, // Use -s filename to snapshot output to a file
 
     #[arg(
         short = 'f',
         long = "format",
-        requires = "save",
+        requires = "snapshot",
         value_enum,
         default_value_t = OutputFormat::Json
     )]
@@ -64,7 +64,7 @@ fn main() {
     let CliInput {
         command,
         verbose,
-        save,
+        snapshot,
         output_format,
     } = CliInput::parse();
 
@@ -146,7 +146,7 @@ fn main() {
         }
     }
 
-    match save {
+    match snapshot {
         Some(path) => {
             match output_format {
                 // No verbose check because inside the match command block,

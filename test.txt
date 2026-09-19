@@ -1,4 +1,0 @@
-    Creating binary (application) `prj` package
-error: destination `/home/cybro/Vault/projects/Clanix/prj` already exists
-
-Use `cargo init` to initialize the directory

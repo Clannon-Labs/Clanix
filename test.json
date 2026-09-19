@@ -1,6 +1,0 @@
-{
-  "success": false,
-  "code": 101,
-  "stdout": "",
-  "stderr": "    Creating binary (application) `prj` package\nerror: destination `/home/cybro/Vault/projects/Clanix/prj` already exists\n\nUse `cargo init` to initialize the directory\n"
-}

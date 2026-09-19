@@ -3,10 +3,12 @@ use std::{
     path::PathBuf, 
     fs,
 };
-use std::process::{Command, Output as ProcessOutput};
+use std::process::Command;
 use serde::{Serialize, Deserialize};
 use serde_json;
 use toml;
+
+const NAME: &str = "Clanix";
 
 #[derive(Parser, Debug)]
 #[command(name = "clanix")]
@@ -29,7 +31,7 @@ struct CliInput {
         value_enum,
         default_value_t = OutputFormat::Json
     )]
-    global_format: OutputFormat,
+    output_format: OutputFormat,
 }
 
 #[derive(Subcommand, Debug)]
@@ -38,18 +40,6 @@ enum Commands {
         program: String,
 
         args: Vec<String>,
-
-        #[arg(short, long)]
-        path: Option<PathBuf>,
-
-        #[arg(
-            short = 'f',
-            long = "format",
-            requires = "path",
-            value_enum,
-            default_value_t = OutputFormat::Json
-        )]
-        run_format: OutputFormat,
     },
     Test,
 
@@ -76,100 +66,107 @@ struct CommandResult {
 }
 
 fn main() {
-    let CliInput {command, verbose, save, global_format} = CliInput::parse();
+    let CliInput {
+        command,
+        verbose,
+        save,
+        output_format,
+    } = CliInput::parse();
 
+    let mut result = CommandResult {
+        success: false,
+        code: None,
+        stdout: "".to_string(),
+        stderr: "".to_string(),
+    };
+    
     match command {
-        Commands::Run {program, args, path, run_format} => {
-            let raw_result = Command::new(&program).args(&args).output().unwrap();
-            
-            let content = content_from_result(&raw_result, &global_format);
-            
+        Commands::Run {program, args} => {
+            let raw_result = Command::new(&program)
+                .args(&args)
+                .output()
+                .unwrap(); // Replace this later
+
             let args = args.join(" ");
-            let cmd_status_msg = format!("Command: '{program} {args}' ran successfully!");
             
-            match save {
-                Some(save_path) => {
-                    println!("Global save flag found! Saving to its path instead.");
-                    
-                    fs::write(&save_path, &content).unwrap();
-                    println!("Output has been saved to file: {:?}", save_path)
-                },
-                None => {
-                    let content = content_from_result(&raw_result, &run_format);
-                    match path {
-                        Some(path) => {
-                            fs::write(&path, &content).unwrap();
-                            println!("Output has been saved to file: {:?}", path)
-                        },
-                        None => {}
-                    }
-                    
-                    println!("{}", cmd_status_msg);
+            // We display stdout incase of success and stderr incase of failure
+            if raw_result.status.success() {
+                let output = String::from_utf8_lossy(&raw_result.stdout);
+                
+                if verbose {
+                    let message = format!("{NAME}: Command {program} {args:?} was ran successfully!\n");
+                    result.stdout = format!("{message}: {output}");
+                    println!("{}", output);
+                } else {
+                    result.stdout = output.clone().into_owned();
+                    println!("{}", &output);
+                }
+            } else {
+                let output = String::from_utf8_lossy(&raw_result.stderr).into_owned();
+                
+                if verbose {
+                    let message = format!("{NAME}: Command {program} {args:?} failed!\n");
+                    result.stderr = format!("{message}: {output}");
+                    println!("{:?}", &raw_result.stderr);
+                } else {
+                    result.stderr = output;
+                    println!("{:?}", &raw_result.stderr);
                 }
             }
+
+            result.success = raw_result.status.success();
+            result.code = raw_result.status.code();
         },
         Commands::Test => {
-            // let result = 
-            let content = format!("\nRan tests(fake) \nVerbose: {verbose}");
-            match save {
-                Some(save_path) => {
-                    fs::write(&save_path, &content).unwrap()
-                },
-                None => {
-                    println!("{}", content)
-                }
+            if verbose {
+                let message = format!("{NAME} [SIMULATED]: Request to run tests was successful");
+                println!("{}", &message);
+                result.stdout = message;
+            } else {
+                println!("[SIMULATED]: Tests successful!");
+                result.stdout = "[SIMULATED]: Tests successful!".to_string();
             }
-        },
-        Commands::Write {path, content} => {
-            /*
-             * Write content to the given file inside Write
-             * and result to the given output
-             */
 
-            
-            let result = format!("\nWrote {content} to {path:?}\nVerbose: {verbose}");
-            match save {
-                Some(save_path) => {
-                    // Write the function result to save_path path
-                    fs::write(&save_path, &result).unwrap();
-                    // Write the content to the given file
-                    fs::write(&path, &content).unwrap()
-                },
-                None => {
-                    println!("{}", result)
-                }
+            result.success = true;
+            result.code = Some(101);
+            result.stderr = "".to_string();
+        },
+        Commands::Write {content, path} => {
+            fs::write(&path, &content).unwrap(); // Replace later
+
+            if verbose {
+                let message = format!("{NAME} [SIMULATED]: Request to write the content '{content}' to {path:?} was successful");
+                println!("{}", &message);
+                result.stdout = message;
+            } else {
+                println!("[SIMULATED]: Wrote to {:?}", path);
+                result.stdout = format!("Wrote to {path:?}");
             }
+
+            result.success = true;
+            result.code = Some(101);
+            result.stderr = "".to_string();
         }
     }
-}
 
-
-fn content_from_result(raw_result: &ProcessOutput, format: &OutputFormat) -> String {
-    let result = CommandResult {
-        success: raw_result.status.success(),
-        code: raw_result.status.code(),
-        stdout: String::from_utf8_lossy(&raw_result.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&raw_result.stderr).into_owned(),
-    };
-    // global_format always has a value
-    match format {
-        OutputFormat::Text => {
-            if result.success {
-                // println!("Success: {}", result.success);
-                let output = String::from_utf8_lossy(&raw_result.stdout).into_owned();
-                println!("{}", output);
-                
-                return output
-            } else {
-                // println!("Success: {}", result.success);
-                return String::from_utf8_lossy(&raw_result.stderr).into_owned()
+    match save {
+        Some(path) => {
+            match output_format {
+                // No verbose check because inside the match command block,
+                // each command already wrote their verbose output
+                OutputFormat::Text => {
+                    fs::write(&path, &result.stdout).unwrap()
+                },
+                OutputFormat::Json => {
+                    let output = serde_json::to_string_pretty(&result).unwrap();
+                    fs::write(&path, &output).unwrap()
+                },
+                OutputFormat::Toml => {
+                    let output = toml::to_string_pretty(&result).unwrap();
+                    fs::write(&path, &output).unwrap()
+                }
             }
         },
-        OutputFormat::Json => {
-            return serde_json::to_string_pretty(&result).unwrap()
-        },
-        OutputFormat::Toml => {
-            return toml::to_string_pretty(&result).unwrap()
-        }
+        None => {}
     }
 }

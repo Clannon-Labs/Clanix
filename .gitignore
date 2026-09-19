@@ -1,1 +1,8 @@
 /target
+# *.txt
+test.*
+/test*/
+test*.*
+/prj/
+/project*/
+output*.*

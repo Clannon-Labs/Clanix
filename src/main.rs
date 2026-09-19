@@ -1,11 +1,8 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use std::{
-    path::PathBuf, 
-    fs,
-};
-use std::process::Command;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json;
+use std::process::Command;
+use std::{fs, path::PathBuf};
 use toml;
 
 const NAME: &str = "Clanix";
@@ -36,25 +33,17 @@ struct CliInput {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    Run {
-        program: String,
-
-        args: Vec<String>,
-    },
+    Run { program: String, args: Vec<String> },
     Test,
 
-    Write {
-        content: String,
-
-        path: PathBuf,
-    }
+    Write { content: String, path: PathBuf },
 }
 
 #[derive(Debug, Clone, ValueEnum, Serialize, Deserialize)]
 enum OutputFormat {
     Text,
     Json,
-    Toml
+    Toml,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,22 +68,20 @@ fn main() {
         stdout: "".to_string(),
         stderr: "".to_string(),
     };
-    
+
     match command {
-        Commands::Run {program, args} => {
-            let raw_result = Command::new(&program)
-                .args(&args)
-                .output()
-                .unwrap(); // Replace this later
+        Commands::Run { program, args } => {
+            let raw_result = Command::new(&program).args(&args).output().unwrap(); // Replace this later
 
             let args = args.join(" ");
-            
+
             // We display stdout incase of success and stderr incase of failure
             if raw_result.status.success() {
                 let output = String::from_utf8_lossy(&raw_result.stdout);
-                
+
                 if verbose {
-                    let message = format!("{NAME}: Command {program} {args:?} was ran successfully!\n");
+                    let message =
+                        format!("{NAME}: Command {program} {args:?} was ran successfully!\n");
                     result.stdout = format!("{message}: {output}");
                     println!("{}", output);
                 } else {
@@ -103,7 +90,7 @@ fn main() {
                 }
             } else {
                 let output = String::from_utf8_lossy(&raw_result.stderr).into_owned();
-                
+
                 if verbose {
                     let message = format!("{NAME}: Command {program} {args:?} failed!\n");
                     result.stderr = format!("{message}: {output}");
@@ -116,7 +103,7 @@ fn main() {
 
             result.success = raw_result.status.success();
             result.code = raw_result.status.code();
-        },
+        }
         Commands::Test => {
             if verbose {
                 let message = format!("{NAME} [SIMULATED]: Request to run tests was successful");
@@ -130,12 +117,14 @@ fn main() {
             result.success = true;
             result.code = Some(101);
             result.stderr = "".to_string();
-        },
-        Commands::Write {content, path} => {
+        }
+        Commands::Write { content, path } => {
             fs::write(&path, &content).unwrap(); // Replace later
 
             if verbose {
-                let message = format!("{NAME} [SIMULATED]: Request to write the content '{content}' to {path:?} was successful");
+                let message = format!(
+                    "{NAME} [SIMULATED]: Request to write the content '{content}' to {path:?} was successful"
+                );
                 println!("{}", &message);
                 result.stdout = message;
             } else {
@@ -154,19 +143,17 @@ fn main() {
             match output_format {
                 // No verbose check because inside the match command block,
                 // each command already wrote their verbose output
-                OutputFormat::Text => {
-                    fs::write(&path, &result.stdout).unwrap()
-                },
+                OutputFormat::Text => fs::write(&path, &result.stdout).unwrap(),
                 OutputFormat::Json => {
                     let output = serde_json::to_string_pretty(&result).unwrap();
                     fs::write(&path, &output).unwrap()
-                },
+                }
                 OutputFormat::Toml => {
                     let output = toml::to_string_pretty(&result).unwrap();
                     fs::write(&path, &output).unwrap()
                 }
             }
-        },
+        }
         None => {}
     }
 }

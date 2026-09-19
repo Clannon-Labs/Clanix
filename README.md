@@ -5,7 +5,7 @@ First commit of Clanix - [Cybro](https://github.com/thecybro)
 ## Examples of supported type of commands (basic for now):
 > [!NOTE]
 > The commands below are just to test *Clanix* running commands,
-> not what *lanix* is made to do, after the very first release, *Clanix* will
+> not what *Clanix* is made to do, after the very first release, *Clanix* will
 > do much more, not merely run some basic commands.
 >
 > If you dont have the binary yet,

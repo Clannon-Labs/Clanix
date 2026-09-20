@@ -8,3 +8,7 @@ test*.*
 output*.*
 
 build.sh
+
+/temp/
+draft*.*
+/draft*/

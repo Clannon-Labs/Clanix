@@ -1,9 +1,12 @@
+
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::process::Command;
+// use std::process::Command;
 use std::{fs, path::PathBuf};
 use toml;
+
+use clanix_core::ExecutionRequest;
 
 const NAME: &str = "Clanix";
 
@@ -77,7 +80,12 @@ fn main() {
 
     match command {
         Commands::Run { program, args } => {
-            let raw_result = Command::new(&program).args(&args).output().unwrap(); // Replace this later
+            // let raw_result = Command::new(&program).args(&args).output().unwrap(); // Replace this later
+            let request = ExecutionRequest {
+                program: program.clone(),
+                args: args.clone(),
+            };
+            let raw_result = request.execute().unwrap();
             // println!("Raw result: {:?}", raw_result);
             
             let args = args.join(" ");

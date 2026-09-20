@@ -1,0 +1,13 @@
+[package]
+name = "clanix-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# External dependencies
+serde.workspace = true
+
+uuid = { version = "1.26.1", features = ["v4", "serde"] }

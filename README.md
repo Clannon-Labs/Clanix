@@ -13,8 +13,8 @@ First commit of Clanix - [Cybro](https://github.com/thecybro)
 
 > (basic)
 - `clanix -s output.txt run cargo new project`
+> (verbose)
 - `clanix -v test`
-> (chained)
 - `clanix -v -s output3.txt run cargo new project2`
 > (output format, not passing -f format would output a json)
 - `clanix -s test.txt -f text run cargo new prj`

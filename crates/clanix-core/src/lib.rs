@@ -9,8 +9,16 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
-    pub program: String,
-    pub args: Vec<String>
+    program: String,
+    args: Vec<String>,
+    policy: Policy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionRequestBuilder {
+    program: String,
+    args: Vec<String>,
+    policy: Policy,
 }
 
 #[derive(Debug, Clone)]
@@ -22,12 +30,30 @@ pub struct ExecutionResult {
     stderr: Vec<u8>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
-    
+    timeout_ms: u64,
+}
+
+impl Policy {
+    fn default() -> Self {
+        Self {
+            timeout_ms: 100,
+        }
+    }
 }
 
 impl ExecutionRequest {
+    pub fn new(program: String, args: Vec<String>) -> ExecutionRequestBuilder {
+        ExecutionRequestBuilder {
+            program: program,
+            args: args,
+            policy: Policy::default()
+        }
+    }   
+}
+
+impl ExecutionRequestBuilder {
     // It consumes the request after you call execute,
     // so you have to create a new request if you want
     // to call execute again
@@ -35,18 +61,31 @@ impl ExecutionRequest {
         let Ok(result) = Command::new(&self.program)
             .args(&self.args)
             .output() else {
-                return Err("Error occured while running command!".to_string())
+                return Err("Error occured while running command".to_string())
             };
+        
+        Ok(ExecutionResult {
+            id: Uuid::new_v4(),
+            success: result.status.success(),
+            status: result.status.code(),
+            stdout: result.stdout,
+            stderr: result.stderr,
+        })
+    }
+    
+    pub fn program(mut self, program: String) -> Self {
+        self.program = program;
+        self
+    }
 
-        return Ok(
-            ExecutionResult {
-                id: Uuid::new_v4(),
-                success: result.status.success(),
-                status: result.status.code(),
-                stdout: result.stdout,
-                stderr: result.stderr
-            }
-        )
+    pub fn args(mut self, args: Vec<String>) -> Self {
+        self.args = args;
+        self
+    }
+
+    pub fn policy(mut self, policy: Policy) -> Self {
+        self.policy = policy;
+        self
     }
 }
 

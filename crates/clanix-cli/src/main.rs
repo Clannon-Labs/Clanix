@@ -39,7 +39,10 @@ struct CliInput {
 enum Commands {
     Run { 
         program: String,
-        args: Vec<String>
+        args: Vec<String>,
+
+        #[arg(short, long)]
+        timeout: u64,
     },
     Test,
 
@@ -83,10 +86,10 @@ fn main() {
     };
 
     match command {
-        Commands::Run { program, args } => {
+        Commands::Run { program, args, timeout } => {
             let result = ExecutionRequest::new(&program)
                 .args(&args)
-                .timeout_ms(100)
+                .timeout_ms(timeout)
                 .execute().unwrap();
             
             // println!("Execution {} was just ran", &result.id());

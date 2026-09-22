@@ -38,7 +38,7 @@ pub struct ExecutionResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Policy {
+pub struct Policy {
     timeout_ms: Duration,
 }
 

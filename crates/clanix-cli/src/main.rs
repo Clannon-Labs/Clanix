@@ -84,13 +84,6 @@ fn main() {
 
     match command {
         Commands::Run { program, args } => {
-            // let request = ExecutionRequest {
-            //     program: program.clone(),
-            //     args: args.clone(),
-            // };
-            // let result = request.execute().unwrap();
-            // println!("Raw result: {:?}", result);
-            
             let result = ExecutionRequest::new(program.clone(), args.clone()).execute().unwrap();
             
             println!("Execution {} was just ran", &result.id());

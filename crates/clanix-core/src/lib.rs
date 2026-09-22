@@ -1,9 +1,15 @@
 
+use std::io::Read;
 use std::borrow::Cow;
-
+use std::sync::mpsc;
+use std::time::{Instant, Duration};
 use std::{
-    process::Command,
+    process::{
+        Command,
+        Stdio,
+    },
 };
+
 use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 
@@ -32,13 +38,17 @@ pub struct ExecutionResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
-    timeout_ms: u64,
+    timeout_ms: Duration,
 }
 
+/*
+ * The defaults are currently hardcoded,
+ * but we can change it later to clean things up
+ */
 impl Policy {
     fn default() -> Self {
         Self {
-            timeout_ms: 100,
+            timeout_ms: Duration::from_millis(1),
         }
     }
 }
@@ -58,18 +68,77 @@ impl ExecutionRequestBuilder {
     // so you have to create a new request if you want
     // to call execute again
     pub fn execute(self) -> Result<ExecutionResult, String> {
-        let Ok(result) = Command::new(&self.program)
-            .args(&self.args)
-            .output() else {
-                return Err("Error occured while running command".to_string())
-            };
+        /*
+         * Change all the panic creating .expect()s with proper
+         * error handling later
+         */
         
-        Ok(ExecutionResult {
-            id: Uuid::new_v4(),
-            success: result.status.success(),
-            status: result.status.code(),
-            stdout: result.stdout,
-            stderr: result.stderr,
+        let mut child = Command::new(&self.program)
+            .args(&self.args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Couldn't spawn a child process");
+
+        let start_time = Instant::now();
+        let id = Uuid::new_v4();
+
+        let mut stdout_stream = child.stdout.take().expect("Couldn't get the stdout stream!");
+        let mut stderr_stream = child.stderr.take().expect("Couldn't get the stderr stream!");
+
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        
+        std::thread::spawn(move || {
+            let mut buffer = [0u8; 1024]; // 1KB buffer
+            while let Ok(bytes_read) = stdout_stream.read(&mut buffer){
+                if bytes_read == 0 {break;}
+                if tx.send(buffer[..bytes_read].to_vec()).is_err() {break;}
+            }
+        });
+
+        let mut captured_stdout: Vec<u8> = Vec::new();
+
+        // keep checking the incoming (non blocking) bytes in loop
+        loop {
+            let timeout_ms = self.policy.timeout_ms;
+            let elapsed_time = start_time.elapsed();
+            // if the process has ran for already over the timeout,
+            // kill it before you do anything else
+            if elapsed_time >= timeout_ms {
+                let _ = child.kill();
+                println!(
+                  "Process ran for {:?} while the timeout was {:?}",
+                elapsed_time, timeout_ms
+                );
+                break;
+            }
+
+            match rx.try_recv() {
+                Ok(bytes) => captured_stdout.extend(bytes),
+                Err(mpsc::TryRecvError::Empty) => {
+                    // No bytes to read.. EOF maybe??
+                    // Sleep for 100 micro s and check again
+                    std::thread::sleep(Duration::from_micros(100))
+                },
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    // Process exited.. it finished maybe??
+                    break;
+                }
+            }
+        }
+
+        let exit_status = child.wait().expect("Couldn't get exit status from the process");
+
+        // Read the stderr if there is any
+        let mut captured_stderr: Vec<u8> = Vec::new();
+        let _ = stderr_stream.read_to_end(&mut captured_stderr);
+
+        Ok(ExecutionResult{
+            id,
+            success: exit_status.success(),
+            status: exit_status.code(),
+            stdout: captured_stdout,
+            stderr: captured_stderr,
         })
     }
     

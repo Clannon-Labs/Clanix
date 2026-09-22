@@ -84,36 +84,50 @@ fn main() {
 
     match command {
         Commands::Run { program, args } => {
-            let result = ExecutionRequest::new(program.clone(), args.clone()).execute().unwrap();
+            let result = ExecutionRequest::new(&program)
+                .args(&args)
+                .timeout_ms(100)
+                .execute().unwrap();
             
-            println!("Execution {} was just ran", &result.id());
+            // println!("Execution {} was just ran", &result.id());
             
             let args = args.join(" ");
 
+            let stdout_output = &result.stdout_string();
+            let stderr_output = &result.stderr_string();
+            
             // We display stdout incase of success and stderr incase of failure
             if result.success() {
-                let output = &result.stdout_string();
-
+                let output = if !stdout_output.trim().is_empty() {
+                    stdout_output
+                } else {
+                    stderr_output
+                };
+                
                 if verbose {
                     let message = format!("{NAME}: Command {program} {args} was ran successfully!\n\n");
                     // result.set_stdout(output.into_owned());
-                    println!("{message} {output}");
+                    println!("{} {}", message, output);
                 } else {
                     let message = format!("{NAME}: {program} {args} was successful!\n\n");
                     // result.set_stdout(output.into_owned()); 
-                    println!("{message} {output}");
+                    println!("{} {}", message, output);
                 }
             } else {
-                let output = result.stderr_string();
-
+                let output = if !stderr_output.trim().is_empty() {
+                    stderr_output
+                } else {
+                    stdout_output
+                };
+                
                 if verbose {
                     let message = format!("{NAME}: Command {program} {args} failed!\n\n");
                     // result.set_stderr(output.into_owned());
-                    eprintln!("{message} {output}");
+                    eprintln!("{} {:?}", message, output);
                 } else {
                     let message = format!("{NAME}: {program} {args} failed!\n\n");
                     // result.set_stderr(output.into_owned());
-                    eprintln!("{message} {output}");
+                    eprintln!("{} {:?}", message, output);
                 }
             }
 

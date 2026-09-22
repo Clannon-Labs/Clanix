@@ -1,4 +1,5 @@
 
+use std::ffi::OsString;
 use std::io::Read;
 use std::borrow::Cow;
 use std::sync::mpsc;
@@ -15,15 +16,15 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
-    program: String,
-    args: Vec<String>,
+    program: OsString,
+    args: Vec<OsString>,
     policy: Policy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequestBuilder {
-    program: String,
-    args: Vec<String>,
+    program: OsString,
+    args: Vec<OsString>,
     policy: Policy,
 }
 
@@ -37,7 +38,7 @@ pub struct ExecutionResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Policy {
+struct Policy {
     timeout_ms: Duration,
 }
 
@@ -54,10 +55,13 @@ impl Policy {
 }
 
 impl ExecutionRequest {
-    pub fn new(program: String, args: Vec<String>) -> ExecutionRequestBuilder {
+    pub fn new<S: Into<OsString>>(program: S) -> ExecutionRequestBuilder {
+        // This just gives you request builder with the
+        // default message and you have to set the program/args
+        // to actually execute it
         ExecutionRequestBuilder {
-            program: program,
-            args: args,
+            program: program.into(),
+            args: Vec::new(),
             policy: Policy::default()
         }
     }   
@@ -67,7 +71,7 @@ impl ExecutionRequestBuilder {
     // It consumes the request after you call execute,
     // so you have to create a new request if you want
     // to call execute again
-    pub fn execute(self) -> Result<ExecutionResult, String> {
+    pub fn execute(&self) -> Result<ExecutionResult, String> {
         /*
          * Change all the panic creating .expect()s with proper
          * error handling later
@@ -80,12 +84,15 @@ impl ExecutionRequestBuilder {
             .spawn()
             .expect("Couldn't spawn a child process");
 
+        let timeout_ms = self.policy.timeout_ms;
+        // println!("Timeout_ms: {:?}", timeout_ms);
+        
         let start_time = Instant::now();
         let id = Uuid::new_v4();
 
         let mut stdout_stream = child.stdout.take().expect("Couldn't get the stdout stream!");
         let mut stderr_stream = child.stderr.take().expect("Couldn't get the stderr stream!");
-
+        
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
         
         std::thread::spawn(move || {
@@ -100,7 +107,6 @@ impl ExecutionRequestBuilder {
 
         // keep checking the incoming (non blocking) bytes in loop
         loop {
-            let timeout_ms = self.policy.timeout_ms;
             let elapsed_time = start_time.elapsed();
             // if the process has ran for already over the timeout,
             // kill it before you do anything else
@@ -133,7 +139,7 @@ impl ExecutionRequestBuilder {
         let mut captured_stderr: Vec<u8> = Vec::new();
         let _ = stderr_stream.read_to_end(&mut captured_stderr);
 
-        Ok(ExecutionResult{
+        Ok(ExecutionResult {
             id,
             success: exit_status.success(),
             status: exit_status.code(),
@@ -141,19 +147,33 @@ impl ExecutionRequestBuilder {
             stderr: captured_stderr,
         })
     }
+
+    // The new() function already has gets the program,
+    // so we dont need another program() here
+    // This is used to pass just one argument
+    pub fn arg<S: Into<OsString>>(mut self, arg: S) -> Self {
+        self.args.push(arg.into());
+        self
+    }
+
+    // This is used to pass multiple arguments or a Vec< >
+    pub fn args<I, S>(mut self, args: I) -> Self 
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<OsString>,
+    {
+        for arg in args {
+            self.args.push(arg.into());
+        }
+        self
+    }
     
-    pub fn program(mut self, program: String) -> Self {
-        self.program = program;
-        self
-    }
-
-    pub fn args(mut self, args: Vec<String>) -> Self {
-        self.args = args;
-        self
-    }
-
-    pub fn policy(mut self, policy: Policy) -> Self {
-        self.policy = policy;
+    // This is used to get the policy so you can later set
+    // the individual policy key
+    // These functions are for setting the individual
+    // policy keys
+    pub fn timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.policy.timeout_ms = Duration::from_millis(timeout_ms);
         self
     }
 }
@@ -194,9 +214,11 @@ impl ExecutionResult {
         String::from_utf8_lossy(&self.stderr)
     }
 
-    // Doing .clone() for these 2 functions for now
-    // but i might have to figure out a way to avoid
-    // this
+    // These functions might not be needed maybe??
+    // Like why do they need to set the original stdout/stderr??
+    // 
+    // if they want to modify it, they can copy and delete/concat
+    // stuff.. so i might delete it soon
     pub fn set_stdout(&mut self, new_stdout: String) {
         self.stdout = new_stdout.into_bytes()
     }

@@ -41,7 +41,9 @@ enum Commands {
         program: String,
         args: Vec<String>,
 
-        #[arg(short, long)]
+        // This is the default set by the cli and the core
+        // has its own default value incase cli doesn't give it any
+        #[arg(short, long, default_value_t = 100)]
         timeout: u64,
     },
     Test,

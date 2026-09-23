@@ -49,7 +49,7 @@ pub struct Policy {
 impl Policy {
     fn default() -> Self {
         Self {
-            timeout_ms: Duration::from_millis(1),
+            timeout_ms: Duration::from_millis(100),
         }
     }
 }

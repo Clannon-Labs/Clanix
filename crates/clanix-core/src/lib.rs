@@ -1,4 +1,6 @@
 
+use std::env;
+use std::path::PathBuf;
 use std::ffi::OsString;
 use std::io::Read;
 use std::borrow::Cow;
@@ -40,6 +42,7 @@ pub struct ExecutionResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
     timeout_ms: Duration,
+    working_dir: PathBuf,
 }
 
 /*
@@ -49,8 +52,17 @@ pub struct Policy {
 impl Policy {
     fn default() -> Self {
         Self {
-            timeout_ms: Duration::from_millis(100),
+            timeout_ms: Self::default_timeout_ms(),
+            working_dir: Self::default_working_dir(), 
         }
+    }
+
+    fn default_timeout_ms() -> Duration {
+        Duration::from_millis(100)
+    }
+
+    fn default_working_dir() -> PathBuf {
+        env::current_dir().unwrap() // Replace this unwrap() later
     }
 }
 
@@ -85,6 +97,7 @@ impl ExecutionRequestBuilder {
             .expect("Couldn't spawn a child process");
 
         let timeout_ms = self.policy.timeout_ms;
+        println!("Current working directory is {:?}", self.policy.working_dir);
         // println!("Timeout_ms: {:?}", timeout_ms);
         
         let start_time = Instant::now();
@@ -174,6 +187,13 @@ impl ExecutionRequestBuilder {
     // policy keys
     pub fn timeout_ms(mut self, timeout_ms: u64) -> Self {
         self.policy.timeout_ms = Duration::from_millis(timeout_ms);
+        self
+    }
+
+    pub fn directory(mut self, directory: Option<PathBuf>) -> Self {
+        self.policy.working_dir = directory.unwrap_or_else(
+            || Policy::default_working_dir()
+        );
         self
     }
 }

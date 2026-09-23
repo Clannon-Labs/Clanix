@@ -1,8 +1,9 @@
 
+use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::{fs, path::PathBuf};
+use std::fs;
 use toml;
 
 use clanix_core::{
@@ -45,6 +46,9 @@ enum Commands {
         // has its own default value incase cli doesn't give it any
         #[arg(short, long, default_value_t = 100)]
         timeout: u64,
+
+        #[arg(short, long)] 
+        directory: Option<PathBuf>,
     },
     Test,
 
@@ -88,11 +92,13 @@ fn main() {
     };
 
     match command {
-        Commands::Run { program, args, timeout } => {
+        Commands::Run { program, args, timeout, directory } => {
             let result = ExecutionRequest::new(&program)
                 .args(&args)
                 .timeout_ms(timeout)
-                .execute().unwrap();
+                .directory(directory)
+                .execute()
+                .unwrap();
             
             // println!("Execution {} was just ran", &result.id());
             

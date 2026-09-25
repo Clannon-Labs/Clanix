@@ -34,6 +34,14 @@ struct CliInput {
         default_value_t = OutputFormat::Json
     )]
     output_format: OutputFormat,
+
+    // This is the default set by the cli and the core
+    // has its own default value incase cli doesn't give it any
+    #[arg(short, long, default_value_t = 100)]
+    timeout: u64,
+
+    #[arg(short, long)] 
+    directory: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -44,11 +52,11 @@ enum Commands {
 
         // This is the default set by the cli and the core
         // has its own default value incase cli doesn't give it any
-        #[arg(short, long, default_value_t = 100)]
-        timeout: u64,
-
-        #[arg(short, long)] 
-        directory: Option<PathBuf>,
+//         #[arg(short, long, default_value_t = 100)]
+//         timeout: u64,
+// 
+//         #[arg(short, long)] 
+//         directory: Option<PathBuf>,
     },
     Test,
 
@@ -81,6 +89,8 @@ fn main() {
         verbose,
         snapshot,
         output_format,
+        timeout,
+        directory
     } = CliInput::parse();
 
     // Dummy result
@@ -92,7 +102,7 @@ fn main() {
     };
 
     match command {
-        Commands::Run { program, args, timeout, directory } => {
+        Commands::Run { program, args } => {
             let result = ExecutionRequest::new(&program)
                 .args(&args)
                 .timeout_ms(timeout)
@@ -108,6 +118,9 @@ fn main() {
             let stderr_output = &result.stderr_string();
             
             // We display stdout incase of success and stderr incase of failure
+            // But some commands might run successfully but put the content in stderr
+            // so we check if there's anything on stderr incase we find stdout empty 
+            // even incase of success
             if result.success() {
                 let output = if !stdout_output.trim().is_empty() {
                     stdout_output

@@ -1,6 +1,7 @@
 
-use std::env;
-use std::path::{PathBuf, Path};
+mod config;
+
+use std::path::PathBuf;
 use std::ffi::OsString;
 use std::io::Read;
 use std::borrow::Cow;
@@ -15,6 +16,9 @@ use std::{
 
 use uuid::Uuid;
 use serde::{Serialize, Deserialize};
+
+// Custom crates
+use config::Config;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
@@ -40,7 +44,7 @@ pub struct ExecutionResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Policy {
+struct Policy {
     timeout_ms: Duration,
     working_dir: PathBuf,
 }
@@ -50,19 +54,22 @@ pub struct Policy {
  * but we can change it later to clean things up
  */
 impl Policy {
-    fn default() -> Self {
-        Self {
-            timeout_ms: Self::default_timeout_ms(),
-            working_dir: Self::default_working_dir(), 
-        }
+    fn fallback() -> Self {
+        let config = Config::new();
+        let defaults = Self {
+            timeout_ms: Self::fallback_timeout_ms(),
+            working_dir: Self::fallback_working_dir(), 
+        }; 
+        let _ = config.generate(&defaults);
+        defaults
     }
 
-    fn default_timeout_ms() -> Duration {
-        Duration::from_millis(1)
+    fn fallback_timeout_ms() -> Duration {
+        Duration::from_millis(Config::read().timeout_ms() as u64)
     }
 
-    fn default_working_dir() -> PathBuf {
-        env::current_dir().unwrap() // Replace this unwrap() later
+    fn fallback_working_dir() -> PathBuf {
+        Config::read().default_working_dir().to_path_buf()
     }
 }
 
@@ -74,7 +81,7 @@ impl ExecutionRequest {
         ExecutionRequestBuilder {
             program: program.into(),
             args: Vec::new(),
-            policy: Policy::default()
+            policy: Policy::fallback()
         }
     }   
 }
@@ -188,15 +195,18 @@ impl ExecutionRequestBuilder {
     // the individual policy key
     // These functions are for setting the individual
     // policy keys
-    pub fn timeout_ms(mut self, timeout_ms: u64) -> Self {
-        self.policy.timeout_ms = Duration::from_millis(timeout_ms);
+    pub fn timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+        self.policy.timeout_ms = match timeout_ms {
+            Some(timeout) => Duration::from_millis(timeout),
+            None => Policy::fallback_timeout_ms()
+        };
         self
     }
 
     pub fn directory(mut self, directory: Option<PathBuf>) -> Self {
         self.policy.working_dir = match directory {
             Some(dir) => dir,
-            None => Policy::default_working_dir()
+            None => Policy::fallback_working_dir()
         };
         self
     }

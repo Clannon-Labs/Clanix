@@ -2,8 +2,8 @@
 use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::fs;
+use serde_json;
 use toml;
 
 use clanix_core::{
@@ -35,10 +35,10 @@ struct CliInput {
     )]
     output_format: OutputFormat,
 
-    // This is the default set by the cli and the core
-    // has its own default value incase cli doesn't give it any
-    #[arg(short, long, default_value_t = 100)]
-    timeout: u64,
+    // all the configs are either read from the config file or 
+    // set by core, cli doesn't do it itself
+    #[arg(short, long)]
+    timeout: Option<u64>,
 
     #[arg(short, long)] 
     directory: Option<PathBuf>,

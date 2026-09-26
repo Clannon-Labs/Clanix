@@ -1,4 +1,4 @@
-# !/bin/bash
+#!/bin/bash
 
 YELLOW='\033[1;33m'
 RESET='\e[0m'

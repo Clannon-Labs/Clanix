@@ -35,6 +35,9 @@ struct CliInput {
     )]
     output_format: OutputFormat,
 
+    #[arg(long = "te")]
+    timeout_enable: bool,
+    
     // all the configs are either read from the config file or 
     // set by core, cli doesn't do it itself
     #[arg(short, long)]
@@ -90,6 +93,7 @@ fn main() {
         snapshot,
         output_format,
         timeout,
+        timeout_enable,
         directory
     } = CliInput::parse();
 
@@ -105,6 +109,7 @@ fn main() {
         Commands::Run { program, args } => {
             let result = ExecutionRequest::new(&program)
                 .args(&args)
+                .timeout_enable(timeout_enable)
                 .timeout_ms(timeout)
                 .directory(directory)
                 .execute()

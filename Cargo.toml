@@ -2,7 +2,7 @@
 resolver = "3"
 members = [
     'crates/clanix-core',
-    'crates/clanix-cli',
+    'crates/clanix-cli', "tests",
 ]
 
 default-members = [

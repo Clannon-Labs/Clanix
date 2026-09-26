@@ -45,6 +45,7 @@ pub struct ExecutionResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Policy {
+    timeout_enable: bool,
     timeout_ms: Duration,
     working_dir: PathBuf,
 }
@@ -57,6 +58,7 @@ impl Policy {
     fn fallback() -> Self {
         let config = Config::new();
         let defaults = Self {
+            timeout_enable: Self::fallback_timeout_enable(),
             timeout_ms: Self::fallback_timeout_ms(),
             working_dir: Self::fallback_working_dir(), 
         }; 
@@ -70,6 +72,10 @@ impl Policy {
 
     fn fallback_working_dir() -> PathBuf {
         Config::read().default_working_dir().to_path_buf()
+    }
+
+    fn fallback_timeout_enable() -> bool {
+        Config::read().default_timeout_enable()
     }
 }
 
@@ -97,6 +103,12 @@ impl ExecutionRequestBuilder {
          */
 
         let working_dir = &self.policy.working_dir;
+        let timeout_ms = self.policy.timeout_ms;
+        let timeout_enable = self.policy.timeout_enable;
+
+        // println!("Current working directory is {:?}", &working_dir);
+        // println!("Timeout_ms: {:?}", timeout_ms);
+        // println!("Timeout enable: {}", timeout_enable);
         
         let mut child = Command::new(&self.program)
             .args(&self.args)
@@ -106,23 +118,30 @@ impl ExecutionRequestBuilder {
             .spawn()
             .expect("Couldn't spawn a child process");
 
-        let timeout_ms = self.policy.timeout_ms;
-        println!("Current working directory is {:?}", &working_dir);
-        // println!("Timeout_ms: {:?}", timeout_ms);
+        // println!("Just ran the command");
         
         let start_time = Instant::now();
         let id = Uuid::new_v4();
 
+        // println!("Just set the start time and id");
+
         let mut stdout_stream = child.stdout.take().expect("Couldn't get the stdout stream!");
         let mut stderr_stream = child.stderr.take().expect("Couldn't get the stderr stream!");
+
+        // println!("Just took stdout and stderr streams");
         
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
+
+        // println!("Just created a channel for Vec<u8>");
         
         std::thread::spawn(move || {
-            let mut buffer = [0u8; 1024]; // 1KB buffer
+            let mut buffer = [0u8; 1024]; // 1KB buffer            
             while let Ok(bytes_read) = stdout_stream.read(&mut buffer){
                 if bytes_read == 0 {break;}
-                if tx.send(buffer[..bytes_read].to_vec()).is_err() {break;}
+                if tx.send(buffer[..bytes_read].to_vec()).is_err() {
+                    // println!("Just sent some bytes to buffer");
+                    break;
+                }
             }
         });
 
@@ -133,17 +152,21 @@ impl ExecutionRequestBuilder {
             let elapsed_time = start_time.elapsed();
             // if the process has ran for already over the timeout,
             // kill it before you do anything else
-            if elapsed_time >= timeout_ms {
+            println!("About to check timeout_enable: {} and timeout_ms: {:?}", timeout_enable, timeout_ms);
+            if (timeout_enable == true) && elapsed_time >= timeout_ms {
                 let _ = child.kill();
                 println!(
                   "Process ran for {:?} while the timeout was {:?}",
-                elapsed_time, timeout_ms
+                  elapsed_time, timeout_ms
                 );
                 break;
             }
 
             match rx.try_recv() {
-                Ok(bytes) => captured_stdout.extend(bytes),
+                Ok(bytes) => {
+                    captured_stdout.extend(bytes);
+                    // println!("Just extended captured_stdout with some bytes")
+                },
                 Err(mpsc::TryRecvError::Empty) => {
                     // No bytes to read.. EOF maybe??
                     // Sleep for 100 micro s and check again
@@ -151,6 +174,7 @@ impl ExecutionRequestBuilder {
                 },
                 Err(mpsc::TryRecvError::Disconnected) => {
                     // Process exited.. it finished maybe??
+                    // println!("Process exited");
                     break;
                 }
             }
@@ -197,12 +221,23 @@ impl ExecutionRequestBuilder {
     // policy keys
     pub fn timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
         self.policy.timeout_ms = match timeout_ms {
-            Some(timeout) => Duration::from_millis(timeout),
-            None => Policy::fallback_timeout_ms()
+            Some(timeout) if self.policy.timeout_enable == true => {
+                Duration::from_millis(timeout)
+            },
+            _ => Policy::fallback_timeout_ms()
         };
         self
     }
 
+    pub fn timeout_enable(mut self, enable: bool) -> Self {
+        self.policy.timeout_enable = if enable == true {
+            enable
+        } else {
+            Policy::fallback_timeout_enable()
+        };
+        self
+    }
+    
     pub fn directory(mut self, directory: Option<PathBuf>) -> Self {
         self.policy.working_dir = match directory {
             Some(dir) => dir,

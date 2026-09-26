@@ -1,5 +1,6 @@
 
 mod config;
+mod shared;
 
 use std::path::PathBuf;
 use std::ffi::OsString;
@@ -18,7 +19,8 @@ use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 
 // Custom crates
-use config::Config;
+pub use config::Config;
+pub use shared::PolicyTrait;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
@@ -44,38 +46,75 @@ pub struct ExecutionResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Policy {
+pub struct Policy {
     timeout_disable: bool,
     timeout_ms: Duration,
     working_dir: PathBuf,
 }
 
+impl PolicyTrait for Policy {
+    fn defaults() -> Self {
+        Self {
+            timeout_disable: Self::default_timeout_disable(),
+            timeout_ms: Self::default_timeout_ms(),
+            working_dir: Self::default_working_dir(),
+        }
+    }
+
+    fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+        match timeout_ms {
+            Some(millis) => {
+                self.timeout_ms = Duration::from_millis(millis);
+                return self
+            },
+            None => return self
+        }
+    }
+
+    fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Self {
+        match working_dir {
+            Some(dir) => {
+                self.working_dir = dir;
+                return self
+            },
+            None => return self
+        }
+    }
+}
+
 /*
- * The defaults are currently hardcoded,
- * but we can change it later to clean things up
+ * User would call the methods from Config to interact
+ * with the config file on disk
+ * 
+ * But if they called the methods from Policy, they will
+ * be interacting with data in memory (not on disk)
  */
-impl Policy {
-    fn fallback() -> Self {
-        let config = Config::new();
-        let defaults = Self {
-            timeout_disable: Self::fallback_timeout_disable(),
-            timeout_ms: Self::fallback_timeout_ms(),
-            working_dir: Self::fallback_working_dir(), 
-        }; 
-        let _ = config.generate(&defaults);
-        defaults
-    }
+impl Policy {    
+    // fn timeout_ms() -> Duration {
+    //     Duration::from_millis(Config::read().timeout_ms() as u64)
+    // }
 
-    fn fallback_timeout_ms() -> Duration {
-        Duration::from_millis(Config::read().timeout_ms() as u64)
-    }
+    // fn working_dir() -> PathBuf {
+    //     Config::read().working_dir().to_path_buf()
+    // }
 
-    fn fallback_working_dir() -> PathBuf {
-        Config::read().default_working_dir().to_path_buf()
-    }
+    // fn timeout_disable() -> bool {
+    //     Config::read().timeout_disable()
+    // }
 
-    fn fallback_timeout_disable() -> bool {
-        Config::read().default_timeout_disable()
+//     fn set_default(mut self, default: bool) -> Option<Self> {
+//         if !default {return None;}
+// 
+//         self = Self::defaults();
+//         Some(self)
+//     }    
+
+    fn set_timeout_disable(mut self, timeout_disable: bool) -> Self {
+        if !timeout_disable { return self; }
+        
+        self.timeout_disable = timeout_disable;
+        return self
+
     }
 }
 
@@ -87,7 +126,7 @@ impl ExecutionRequest {
         ExecutionRequestBuilder {
             program: program.into(),
             args: Vec::new(),
-            policy: Policy::fallback()
+            policy: Policy::defaults()
         }
     }   
 }
@@ -219,36 +258,18 @@ impl ExecutionRequestBuilder {
     // the individual policy key
     // These functions are for setting the individual
     // policy keys
-    pub fn timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
-        self.policy.timeout_ms = match timeout_ms {
-            Some(timeout) if self.policy.timeout_disable == true => {
-                Duration::from_millis(timeout)
-            },
-            _ => Policy::fallback_timeout_ms()
-        };
+    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+        self.policy = Policy::set_timeout_ms(self.policy, timeout_ms);
         self
     }
 
-    pub fn timeout_disable(mut self, disable: bool) -> Self {
-        self.policy.timeout_disable = if disable == false {
-            false
-        } else if disable == true {
-            true
-        } else { 
-            // I dont think the code will even have to evaluate
-            // this check because disable will either be true or false
-            // not anything else..
-            // so we dont even need this check but i kept it just incase
-            Policy::fallback_timeout_disable()  
-        };
+    pub fn set_timeout_disable(mut self, disable: bool) -> Self {
+        self.policy = Policy::set_timeout_disable(self.policy, disable);
         self
     }
     
-    pub fn directory(mut self, directory: Option<PathBuf>) -> Self {
-        self.policy.working_dir = match directory {
-            Some(dir) => dir,
-            None => Policy::fallback_working_dir()
-        };
+    pub fn set_working_dir(mut self, directory: Option<PathBuf>) -> Self {
+        self.policy = Policy::set_working_dir(self.policy, directory);
         self
     }
 }

@@ -8,6 +8,8 @@ use toml;
 
 use clanix_core::{
     ExecutionRequest,
+    PolicyTrait,
+    Config,
 };
 
 const NAME: &str = "Clanix";
@@ -59,6 +61,20 @@ enum Commands {
         content: String,
         path: PathBuf
     },
+
+    Config {
+        #[arg(long = "default" )]
+        default: bool,
+        
+        #[arg(long = "td", alias = "timeout-disable")]
+        timeout_disable: Option<bool>,
+
+        #[arg(short, long)]
+        timeout_ms: Option<u64>,
+
+        #[arg(long = "working-dir", alias = "wd" )]
+        working_dir: Option<PathBuf>,
+    }
 }
 
 #[derive(Debug, Clone, ValueEnum, Serialize, Deserialize)]
@@ -101,9 +117,9 @@ fn main() {
         Commands::Run { program, args } => {
             let result = ExecutionRequest::new(&program)
                 .args(&args)
-                .timeout_disable(timeout_disable)
-                .timeout_ms(timeout)
-                .directory(directory)
+                .set_timeout_disable(timeout_disable)
+                .set_timeout_ms(timeout)
+                .set_working_dir(directory)
                 .execute()
                 .unwrap();
             
@@ -186,6 +202,27 @@ fn main() {
             test_result.success = true;
             test_result.code = Some(101);
             test_result.stderr = "".to_string();
+        },
+        Commands::Config { timeout_disable, timeout_ms, working_dir, default } => {
+            
+            /*
+             * The core could technically be able to set the config to default if
+             * we called .set_default() at the end of the chain but it would be 
+             * a waste of resources, so we check the condition and set to default if
+             * user wants so
+             */
+            
+            println!("{timeout_disable:?}, {timeout_ms:?}, {working_dir:?}");
+            if !default {
+            let config = Config::new()
+                .set_timeout_disable(timeout_disable)
+                .set_timeout_ms(timeout_ms)
+                .set_working_dir(working_dir);
+            println!("{config:?}");
+            }
+
+            let config = Config::set_default(default);
+            println!("{config:?}");
         }
     }
 

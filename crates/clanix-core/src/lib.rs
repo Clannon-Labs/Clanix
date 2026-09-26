@@ -45,7 +45,7 @@ pub struct ExecutionResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Policy {
-    timeout_enable: bool,
+    timeout_disable: bool,
     timeout_ms: Duration,
     working_dir: PathBuf,
 }
@@ -58,7 +58,7 @@ impl Policy {
     fn fallback() -> Self {
         let config = Config::new();
         let defaults = Self {
-            timeout_enable: Self::fallback_timeout_enable(),
+            timeout_disable: Self::fallback_timeout_disable(),
             timeout_ms: Self::fallback_timeout_ms(),
             working_dir: Self::fallback_working_dir(), 
         }; 
@@ -74,8 +74,8 @@ impl Policy {
         Config::read().default_working_dir().to_path_buf()
     }
 
-    fn fallback_timeout_enable() -> bool {
-        Config::read().default_timeout_enable()
+    fn fallback_timeout_disable() -> bool {
+        Config::read().default_timeout_disable()
     }
 }
 
@@ -104,11 +104,11 @@ impl ExecutionRequestBuilder {
 
         let working_dir = &self.policy.working_dir;
         let timeout_ms = self.policy.timeout_ms;
-        let timeout_enable = self.policy.timeout_enable;
+        let timeout_disable = self.policy.timeout_disable;
 
-        // println!("Current working directory is {:?}", &working_dir);
-        // println!("Timeout_ms: {:?}", timeout_ms);
-        // println!("Timeout enable: {}", timeout_enable);
+        println!("Current working directory is {:?}", &working_dir);
+        println!("Timeout_ms: {:?}", timeout_ms);
+        println!("Timeout disable: {}", timeout_disable);
         
         let mut child = Command::new(&self.program)
             .args(&self.args)
@@ -152,8 +152,8 @@ impl ExecutionRequestBuilder {
             let elapsed_time = start_time.elapsed();
             // if the process has ran for already over the timeout,
             // kill it before you do anything else
-            println!("About to check timeout_enable: {} and timeout_ms: {:?}", timeout_enable, timeout_ms);
-            if (timeout_enable == true) && elapsed_time >= timeout_ms {
+            // println!("About to check timeout_disable: {} and timeout_ms: {:?}", timeout_disable, timeout_ms);
+            if (timeout_disable != true) && elapsed_time >= timeout_ms {
                 let _ = child.kill();
                 println!(
                   "Process ran for {:?} while the timeout was {:?}",
@@ -221,7 +221,7 @@ impl ExecutionRequestBuilder {
     // policy keys
     pub fn timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
         self.policy.timeout_ms = match timeout_ms {
-            Some(timeout) if self.policy.timeout_enable == true => {
+            Some(timeout) if self.policy.timeout_disable == true => {
                 Duration::from_millis(timeout)
             },
             _ => Policy::fallback_timeout_ms()
@@ -229,11 +229,17 @@ impl ExecutionRequestBuilder {
         self
     }
 
-    pub fn timeout_enable(mut self, enable: bool) -> Self {
-        self.policy.timeout_enable = if enable == true {
-            enable
-        } else {
-            Policy::fallback_timeout_enable()
+    pub fn timeout_disable(mut self, disable: bool) -> Self {
+        self.policy.timeout_disable = if disable == false {
+            false
+        } else if disable == true {
+            true
+        } else { 
+            // I dont think the code will even have to evaluate
+            // this check because disable will either be true or false
+            // not anything else..
+            // so we dont even need this check but i kept it just incase
+            Policy::fallback_timeout_disable()  
         };
         self
     }

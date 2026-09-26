@@ -35,8 +35,8 @@ struct CliInput {
     )]
     output_format: OutputFormat,
 
-    #[arg(long = "te")]
-    timeout_enable: bool,
+    #[arg(long = "td", alias = "timeout-disable")]
+    timeout_disable: bool,
     
     // all the configs are either read from the config file or 
     // set by core, cli doesn't do it itself
@@ -52,14 +52,6 @@ enum Commands {
     Run { 
         program: String,
         args: Vec<String>,
-
-        // This is the default set by the cli and the core
-        // has its own default value incase cli doesn't give it any
-//         #[arg(short, long, default_value_t = 100)]
-//         timeout: u64,
-// 
-//         #[arg(short, long)] 
-//         directory: Option<PathBuf>,
     },
     Test,
 
@@ -93,7 +85,7 @@ fn main() {
         snapshot,
         output_format,
         timeout,
-        timeout_enable,
+        timeout_disable,
         directory
     } = CliInput::parse();
 
@@ -109,7 +101,7 @@ fn main() {
         Commands::Run { program, args } => {
             let result = ExecutionRequest::new(&program)
                 .args(&args)
-                .timeout_enable(timeout_enable)
+                .timeout_disable(timeout_disable)
                 .timeout_ms(timeout)
                 .directory(directory)
                 .execute()

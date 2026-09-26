@@ -12,7 +12,7 @@ const NAME: &str = "clanix.json";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct Config {
-    timeout: bool,
+    timeout_disable: bool,
     timeout_ms: u128,
     default_working_dir: PathBuf,
 }
@@ -26,13 +26,13 @@ impl Config {
         &self.default_working_dir
     }
 
-    pub(super) fn default_timeout_enable(&self) -> bool {
-        self.timeout
+    pub(super) fn default_timeout_disable(&self) -> bool {
+        self.timeout_disable
     }
 
     fn defaults() -> Self {
         Self {
-            timeout: true,
+            timeout_disable: true,
             timeout_ms: 100,
             default_working_dir: env::current_dir().unwrap(), // replace it later
         }
@@ -44,7 +44,7 @@ impl Config {
     
     pub(super) fn generate(&self, policy: &Policy) {
         let _config = Self {
-            timeout: policy.timeout_enable,
+            timeout_disable: policy.timeout_disable,
             timeout_ms: policy.timeout_ms.as_millis(),
             default_working_dir: policy.working_dir.clone()
         };

@@ -1,3 +1,13 @@
+//! clanix-cli is the client that uses the abstraction
+//! provided by the core to do the tasks the user wants.
+//! 
+//! Clients just handles the user facing part and doesn't worry about how the actual
+//! work is done behind the scenes by clanix-core.
+//! 
+//! Clients can design the user facing api/commands however they want and core doesn't
+//! care about any of that, all the client needs to do is use the structs/methods provided
+//! by the core, doesn't matter how client wants to use them to make the user facing cli
+//! or whatever the client does
 
 use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -23,24 +33,31 @@ about = "Clanix is a fast developer execution tool built by Clannon Labs - Cybro
 Visit https://github.com/Clannon-Labs/Clanix to read the documents"
 )]
 struct CliInput {
+    /// The commands the user actually types
+    /// For example: run, write, config etc
     #[command(subcommand)]
     command: Commands,
 
-    /*
-     * These arguments only change the in-memory policies,
-     * not the persistent configs,
-     * To change the configs, you have to use `clanix config`
-     */
+    /// These arguments only change the in-memory values/policies,
+    /// not the persistent configs,
+    /// To change the configs, you have to use `clanix config`
 
+    /// The directory the operation actually happens
     #[arg(long = "working-dir", visible_alias = "wd" )] 
     working_dir: Option<PathBuf>,
-    
+
+    /// Option to enable/to disable verbosity.
+    /// Having this enabled means clanix will give you more
+    /// detailed/verbose outputs everywhere
     #[arg(short, long)]
     verbose: bool,
 
+    /// Whether or not user wants to save/snapshot the output to a file
     #[arg(short, long)]
     snapshot: Option<PathBuf>, // Use -s filename to snapshot output to a file
 
+    /// What format does the user want to save their snapshot..
+    /// Default is Json as you can see here
     #[arg(
         short = 'f',
         long = "format",
@@ -50,34 +67,46 @@ struct CliInput {
     )]
     output_format: OutputFormat,
 
+    /// To disable timeout for any one operation
+    /// You can use --dt true to disable whatever timeout you had set
+    /// And you can use --dt false to enable (or not disable) the timeout
+    /// you have
     #[arg(long = "disable-timeout", visible_alias = "dt")]
     disable_timeout: bool,
-    
+
+    /// The actual timeout you want to set
     #[arg(short, long)]
     timeout: Option<u64>,
 }
 
+/// The commands available to use
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// A basic command you can use to run something (not even a prototype yet)
     Run { 
         program: String,
         args: Vec<String>,
     },
+
+    /// Just simulates test for now, we can put actual testing in future
     Test,
 
+    /// To write some content to disk
     Write {
         content: String,
         path: PathBuf
     },
 
-    // all the configs are either read from the config file or 
-    // set by core, cli doesn't do it itself
+    /// All the configs are either read from the config file or 
+    /// set by core, cli doesn't do it itself.
+    /// 
+    /// Cli can just change the config for any one operation only
     Config {
         #[arg(short, long = "default", visible_alias = "init" )]
         default: bool,
         
         #[arg(long = "disable-timeout", visible_alias = "dt")]
-        disable_timeout: bool,
+        disable_timeout: Option<bool>,
 
         #[arg(short, long)]
         timeout_ms: Option<u64>,
@@ -87,6 +116,8 @@ enum Commands {
     }
 }
 
+/// The output formats available for the snapshots and whatever else
+/// clanix saves on disk
 #[derive(Debug, Clone, ValueEnum, Serialize, Deserialize)]
 enum OutputFormat {
     Text,
@@ -137,12 +168,12 @@ fn main() {
                 
                 let final_output = output.clone().into_owned();
                 if verbose {
-                    let message = format!("{NAME}: Command {program} {args} was ran successfully!\n\n{final_output}");
-                    println!("Following stdout was set: \n\n{message}");
+                    let message = format!("{NAME}: Command {program} {args} was ran successfully!\n{final_output}\n");
+                    println!("{message}");
                     result.set_stdout(message);
                 } else {
-                    let message = format!("{NAME}: {program} {args} was successful!\n\n{final_output}");
-                    println!("Following stdout was set: \n\n{message}");
+                    let message = format!("{NAME}: {program} {args} was successful!\n{final_output}\n");
+                    println!("{message}");
                     result.set_stdout(message)
                 }
             } else {
@@ -154,12 +185,12 @@ fn main() {
 
                 let final_output = output.clone().into_owned();
                 if verbose {
-                    let message = format!("{NAME}: Command {program} {args} failed!\n\n{output}");
-                    eprintln!("Following stdout was set: \n\n{message}");
+                    let message = format!("{NAME}: Command {program} {args} failed!\n{output}\n");
+                    eprintln!("{message}");
                     result.set_stderr(final_output)
                 } else {
-                    let message = format!("{NAME}: {program} {args} failed!\n\n{output}");
-                    eprintln!("Following stdout was set: \n\n{message}");
+                    let message = format!("{NAME}: {program} {args} failed!\n{output}\n");
+                    eprintln!("{message}");
                     result.set_stderr(final_output)
                 }
             }
@@ -169,12 +200,13 @@ fn main() {
         }
         Commands::Test => {
             if verbose {
-                let message = format!("{NAME} [SIMULATED]: Request to run tests was successful");
-                println!("{}", &message);
+                let message = format!("{NAME} [SIMULATED]: Request to run tests was successful\n");
+                println!("{message}");
                 result.set_stdout(message);
             } else {
-                println!("[SIMULATED]: Tests successful!");
-                result.set_stdout("[SIMULATED]: Tests successful!".to_string());
+                let message = "[SIMULATED]: Tests successful!".to_string();
+                println!("{message}");
+                result.set_stdout(message);
             }
 
             result.set_success(true);
@@ -186,13 +218,13 @@ fn main() {
 
             if verbose {
                 let message = format!(
-                    "{NAME} [SIMULATED]: Request to write the content '{content}' to {path:?} was successful"
+                    "{NAME} [SIMULATED]: Request to write the content '{content}' to {path:?} was successful\n"
                 );
-                println!("{}", &message);
+                println!("{message}");
                 result.set_stdout(message);
             } else {
                 let message = "[SIMULATED]: Wrote to {path:?}".to_string();
-                println!("Following stdout was set: \n\n{message}");
+                println!("{message}");
                 result.set_stdout(message);
             }
 
@@ -215,12 +247,12 @@ fn main() {
 
                 // println!("{config:?}");
                 if verbose {
-                    let message = format!("{NAME}: Successfully set the following config: {config:?}");
-                    println!("Following stdout was set: \n\n{message}");
+                    let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
+                    println!("{message}");
                     result.set_stdout(message);
                 } else {
-                    let message = format!("{NAME}: Successfully set the config.");
-                    println!("Following stdout was set: \n\n{message}");
+                    let message = format!("{NAME}: Successfully set the config.\n");
+                    println!("{message}");
                     result.set_stdout(message);
                 }
             } else {
@@ -228,14 +260,14 @@ fn main() {
                     .set_disable_timeout(disable_timeout)
                     .set_timeout_ms(timeout_ms)
                     .set_working_dir(working_dir);
-                // println!("{config:?}");
+                
                 if verbose {
-                    let message = format!("{NAME}: Successfully set the following config: {config:?}");
-                    println!("Following stdout was set: \n\n{message}");
+                    let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
+                    println!("{message}");
                     result.set_stdout(message);
                 } else {
-                    let message = format!("{NAME}: Successfully set the config.");
-                    println!("Following stdout was set: \n\n{message}");
+                    let message = format!("{NAME}: Successfully set the config.\n");
+                    println!("{message}");
                     result.set_stdout(message);
                 }
             }
@@ -248,25 +280,21 @@ fn main() {
 
     match snapshot {
         Some(path) => {
-            println!("Snapshot requested");
             match output_format {
                 // No verbose check because inside the match command block,
                 // each command already wrote their verbose output
                 OutputFormat::Text => {
-                    println!("Text format requested");
                     let final_path = result.working_dir().join(path);
                     fs::write(&final_path, &result.stdout()).unwrap();
                     println!("Wrote stdout to {final_path:?}")
                 },
                 OutputFormat::Json => {
-                    println!("Json format requested");
                     let final_path = result.working_dir().join(path);
                     let output = serde_json::to_string_pretty(&result).unwrap();
                     fs::write(&final_path, &output).unwrap();
                     println!("Wrote stdout to {final_path:?}")
                 }
                 OutputFormat::Toml => {
-                    println!("Toml format requested");
                     let final_path = result.working_dir().join(path);
                     let output = toml::to_string_pretty(&result).unwrap();
                     fs::write(&final_path, &output).unwrap();

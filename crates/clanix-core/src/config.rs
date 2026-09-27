@@ -1,3 +1,10 @@
+//! Config also implements the builder pattern and
+//! provides the benefits that the ExecutionRequest also provides.
+//! 
+//! Config is the actual persistent policy version you use to set the persistent
+//! values
+//! 
+//! It shares the same PolicyTrait trait as policy
 
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -12,6 +19,9 @@ use super::{
 
 const NAME: &str = "clanix.json";
 
+/// The main config that provides the ConfigBuilder to the clients
+/// which they can use to operate on the config without having to worry
+/// about the internal messy structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     disable_timeout: bool,
@@ -28,12 +38,11 @@ pub struct ConfigBuilder {
 
 
 impl Config {
-    /*
-     * Incase of Config, new() gives the new instance of what already exists on disk,
-     * you can call defaults() on ConfigBuilder if you explicitly want defaults
-     * 
-     * The reason behind keeping 2 functions however; is clarity
-     */
+     /// Incase of Config, new() gives the new instance of what already exists on disk,
+     /// you can call defaults() on ConfigBuilder if you explicitly want defaults
+     /// 
+     /// The reason behind keeping 2 functions however; is clarity
+     
     pub fn new() -> ConfigBuilder {
         ConfigBuilder::read()
     }
@@ -90,14 +99,11 @@ impl PolicyTrait for ConfigBuilder {
 }
 
 impl ConfigBuilder {
+    /// If user passed default: true, set_default()
+    /// sets the default in config(disk) and return
+    /// ConfigBuilder, if not, it just returns ConfigBuilder
+    /// without making change in disk/config
     pub fn set_default(default: bool) -> Self {
-        /*
-         * If user passed default: true,
-         * set the default in config(disk) and return
-         * Self, if not, just return Self without
-         * making change in disk/config
-         */
-        
         if default {
             Self::defaults()
                 .generate()
@@ -115,7 +121,14 @@ impl ConfigBuilder {
             None => self
         }
     }
-    
+
+    /// Create the ConfigBuilder struct instance and write on disk
+    /// 
+    /// Here, we dont write the instance of Config because the timeout_ms
+    /// inside Config which we use to do operations is in Duration form,
+    /// because it allows us to do various kinds of stuff
+    /// but we dont want to store Duration struct instance on disk,
+    /// we want a clean timeout_ms: u128.
     pub fn generate(self) -> Self {
         let config = serde_json::to_string_pretty(
             &ConfigBuilder {
@@ -129,6 +142,10 @@ impl ConfigBuilder {
         self
     }
 
+    /// Read the config from disk which is stored in the form of builder struct
+    /// and if the file doesn't exist, return the default config.
+    /// 
+    /// This doesn't create or change the config on disk
     pub fn read() -> ConfigBuilder {
         if !PathBuf::from(NAME).exists() {
             println!("{NAME} doesn't exist..\nDefaulting to fallback values..");

@@ -6,6 +6,8 @@ test*.*
 /prj/
 /project*/
 output*.*
+!docs
+!docs/*
 
 # build.sh
 clanix.json

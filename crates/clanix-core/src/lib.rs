@@ -16,11 +16,11 @@ use std::{
 };
 
 use uuid::Uuid;
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 // Custom crates
-pub use config::Config;
-pub use shared::PolicyTrait;
+pub use config::Config; // Export so it is usable from outside
+pub use shared::PolicyTrait; // Export + use it here
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
@@ -36,31 +36,69 @@ pub struct ExecutionRequestBuilder {
     policy: Policy,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionResult {
     id: Uuid,
     success: bool,
     status: Option<i32>,
+
+    #[serde(serialize_with = "bytes_to_str", deserialize_with = "str_to_bytes")]
     stdout: Vec<u8>,
+
+    #[serde(serialize_with = "bytes_to_str", deserialize_with = "str_to_bytes")]
     stderr: Vec<u8>,
+    
+    working_dir: PathBuf,
 }
 
+fn bytes_to_str<S>(bytes: &[u8], serializer: S) -> Result<S:: Ok, S::Error>
+    where S: Serializer,
+    {
+        serializer.serialize_str(
+            &String::from_utf8_lossy(bytes)
+        )
+    }
+
+fn str_to_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(s.into_bytes())
+    }
+    
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
-    timeout_disable: bool,
+    disable_timeout: bool,
     timeout_ms: Duration,
     working_dir: PathBuf,
 }
 
+/*
+ * Calling any method on policy changes data only in memory
+ * so if you want to make the change persistent, aka change 
+ * in disk, you MUST call the Config methods, not Policy ones
+ */
 impl PolicyTrait for Policy {
     fn defaults() -> Self {
         Self {
-            timeout_disable: Self::default_timeout_disable(),
+            disable_timeout: Self::default_disable_timeout(),
             timeout_ms: Self::default_timeout_ms(),
             working_dir: Self::default_working_dir(),
         }
     }
 
+    fn timeout_ms(&self) -> Duration {
+        self.timeout_ms
+    }
+    
+    fn disable_timeout(&self) -> bool {
+        self.disable_timeout
+    }
+    
+    fn working_dir(&self) -> &PathBuf {
+        &self.working_dir
+    }
+    
     fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
         match timeout_ms {
             Some(millis) => {
@@ -80,6 +118,14 @@ impl PolicyTrait for Policy {
             None => return self
         }
     }
+
+    fn set_disable_timeout(mut self, disable: bool) -> Self {
+        if !disable { return self; }
+        
+        self.disable_timeout = disable;
+        return self
+
+    }
 }
 
 /*
@@ -89,34 +135,6 @@ impl PolicyTrait for Policy {
  * But if they called the methods from Policy, they will
  * be interacting with data in memory (not on disk)
  */
-impl Policy {    
-    // fn timeout_ms() -> Duration {
-    //     Duration::from_millis(Config::read().timeout_ms() as u64)
-    // }
-
-    // fn working_dir() -> PathBuf {
-    //     Config::read().working_dir().to_path_buf()
-    // }
-
-    // fn timeout_disable() -> bool {
-    //     Config::read().timeout_disable()
-    // }
-
-//     fn set_default(mut self, default: bool) -> Option<Self> {
-//         if !default {return None;}
-// 
-//         self = Self::defaults();
-//         Some(self)
-//     }    
-
-    fn set_timeout_disable(mut self, timeout_disable: bool) -> Self {
-        if !timeout_disable { return self; }
-        
-        self.timeout_disable = timeout_disable;
-        return self
-
-    }
-}
 
 impl ExecutionRequest {
     pub fn new<S: Into<OsString>>(program: S) -> ExecutionRequestBuilder {
@@ -143,11 +161,11 @@ impl ExecutionRequestBuilder {
 
         let working_dir = &self.policy.working_dir;
         let timeout_ms = self.policy.timeout_ms;
-        let timeout_disable = self.policy.timeout_disable;
+        let disable_timeout = self.policy.disable_timeout;
 
         println!("Current working directory is {:?}", &working_dir);
         println!("Timeout_ms: {:?}", timeout_ms);
-        println!("Timeout disable: {}", timeout_disable);
+        println!("Timeout disable: {}", disable_timeout);
         
         let mut child = Command::new(&self.program)
             .args(&self.args)
@@ -191,8 +209,8 @@ impl ExecutionRequestBuilder {
             let elapsed_time = start_time.elapsed();
             // if the process has ran for already over the timeout,
             // kill it before you do anything else
-            // println!("About to check timeout_disable: {} and timeout_ms: {:?}", timeout_disable, timeout_ms);
-            if (timeout_disable != true) && elapsed_time >= timeout_ms {
+            // println!("About to check disable_timeout: {} and timeout_ms: {:?}", disable_timeout, timeout_ms);
+            if (disable_timeout == false) && elapsed_time >= timeout_ms {
                 let _ = child.kill();
                 println!(
                   "Process ran for {:?} while the timeout was {:?}",
@@ -231,12 +249,10 @@ impl ExecutionRequestBuilder {
             status: exit_status.code(),
             stdout: captured_stdout,
             stderr: captured_stderr,
+            working_dir: self.policy.working_dir.clone(),
         })
     }
-
-    // The new() function already has gets the program,
-    // so we dont need another program() here
-    // This is used to pass just one argument
+    
     pub fn arg<S: Into<OsString>>(mut self, arg: S) -> Self {
         self.args.push(arg.into());
         self
@@ -263,8 +279,8 @@ impl ExecutionRequestBuilder {
         self
     }
 
-    pub fn set_timeout_disable(mut self, disable: bool) -> Self {
-        self.policy = Policy::set_timeout_disable(self.policy, disable);
+    pub fn set_disable_timeout(mut self, disable: bool) -> Self {
+        self.policy = Policy::set_disable_timeout(self.policy, disable);
         self
     }
     
@@ -282,10 +298,31 @@ impl ExecutionResult {
     // so calling these methods is safer because these will
     // translate whatever was changed internally into what the
     // callers expect; with no breaking changes
+
+    pub fn defaults(working_dir: &Option<PathBuf>) -> Self {
+        let directory = match working_dir {
+            Some(dir) => dir.clone(),
+            None => Policy::default_working_dir()
+        };
+        
+        Self {
+            id: Uuid::new_v4(),
+            success: false,
+            status: None,
+            stdout: vec![],
+            stderr: vec![],
+            working_dir: directory
+        }
+    }
+
     pub fn id(&self) -> &Uuid {
         &self.id
     }
 
+    pub fn working_dir(&self) -> &PathBuf {
+        &self.working_dir
+    }
+    
     pub fn success(&self) -> bool {
         self.success
     }
@@ -310,11 +347,14 @@ impl ExecutionResult {
         String::from_utf8_lossy(&self.stderr)
     }
 
-    // These functions might not be needed maybe??
-    // Like why do they need to set the original stdout/stderr??
-    // 
-    // if they want to modify it, they can copy and delete/concat
-    // stuff.. so i might delete it soon
+    pub fn set_success(&mut self, new_success: bool) {
+        self.success = new_success
+    }
+
+    pub fn set_status(&mut self, new_status: Option<i32>) {
+        self.status = new_status
+    }
+    
     pub fn set_stdout(&mut self, new_stdout: String) {
         self.stdout = new_stdout.into_bytes()
     }

@@ -5,11 +5,7 @@ use std::time::Duration;
 
 pub trait PolicyTrait {
     fn defaults() -> Self;
-    fn new() -> Self 
-        where Self: Sized {
-        Self::defaults()
-    }
-    
+
     fn default_timeout_ms() -> Duration {
         Duration::from_millis(1)
     }
@@ -27,6 +23,6 @@ pub trait PolicyTrait {
     fn working_dir(&self) -> &PathBuf;
     
     fn set_timeout_ms(self, timeout_ms: Option<u64>) -> Self;
-    fn set_disable_timeout(self, disable: bool) -> Self;
+    // fn set_disable_timeout(self, disable: bool) -> Self;
     fn set_working_dir(self, working_dir: Option<PathBuf>) -> Self;
 }

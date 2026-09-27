@@ -12,35 +12,52 @@ use super::{
 
 const NAME: &str = "clanix.json";
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     disable_timeout: bool,
     timeout_ms: Duration,
     working_dir: PathBuf,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TempConfig {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigBuilder {
     disable_timeout: bool,
     timeout_ms: u128,
     working_dir: PathBuf,
 }
 
 
+impl Config {
+    /*
+     * Incase of Config, new() gives the new instance of what already exists on disk,
+     * you can call defaults() on ConfigBuilder if you explicitly want defaults
+     * 
+     * The reason behind keeping 2 functions however; is clarity
+     */
+    pub fn new() -> ConfigBuilder {
+        ConfigBuilder::read()
+    }
+
+    pub fn set_default(default: bool) -> ConfigBuilder {
+        ConfigBuilder::set_default(default)
+    }
+    
+}
+
 /*
  * Call of any method of Config changes persistent state, aka on disk
  */
-impl PolicyTrait for Config {
+impl PolicyTrait for ConfigBuilder {
     fn defaults() -> Self {
         Self {
-            disable_timeout: Self::default_disable_timeout(),
-            timeout_ms: Self::default_timeout_ms(),
-            working_dir: Self::default_working_dir() 
+            disable_timeout: ConfigBuilder::default_disable_timeout(),
+            timeout_ms: ConfigBuilder::default_timeout_ms().as_millis(),
+            working_dir: ConfigBuilder::default_working_dir() 
         }
     }
 
     fn timeout_ms(&self) -> Duration {
-        self.timeout_ms
+        Duration::from_millis(self.timeout_ms as u64)
     }
     
     fn disable_timeout(&self) -> bool {
@@ -54,8 +71,8 @@ impl PolicyTrait for Config {
     fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
         match timeout_ms {
             Some(timeout) => {
-                self.timeout_ms = Duration::from_millis(timeout);
-                return Self::generate(self); // make changes to disk
+                self.timeout_ms = timeout as u128;
+                self.generate() // make changes to disk
             },
             None => return self
         }
@@ -65,21 +82,14 @@ impl PolicyTrait for Config {
         match working_dir {
             Some(dir) => {
                 self.working_dir = dir;
-                return Self::generate(self); // make changes to disk
+                self.generate() // make changes to disk
             },
             None => return self
         }
     }
-
-    fn set_disable_timeout(mut self, disable: bool) -> Self {
-        if !disable {return self;}
-
-        self.disable_timeout = disable;
-        self.generate()
-    }
 }
 
-impl Config {
+impl ConfigBuilder {
     pub fn set_default(default: bool) -> Self {
         /*
          * If user passed default: true,
@@ -89,18 +99,28 @@ impl Config {
          */
         
         if default {
-            Config::defaults()
+            Self::defaults()
                 .generate()
         } else {
-            Config::defaults()
+            Self::defaults()
+        }
+    }
+
+    pub fn set_disable_timeout(mut self, disable: Option<bool>) -> Self {
+        match disable {
+            Some(dis) => {
+                self.disable_timeout = dis;
+                self.generate()
+            },
+            None => self
         }
     }
     
     pub fn generate(self) -> Self {
         let config = serde_json::to_string_pretty(
-            &TempConfig {
+            &ConfigBuilder {
                 disable_timeout: self.disable_timeout,
-                timeout_ms: self.timeout_ms.as_millis(),
+                timeout_ms: self.timeout_ms,
                 working_dir: self.working_dir.clone()
             }
         ).unwrap();
@@ -109,10 +129,10 @@ impl Config {
         self
     }
 
-    pub fn read() -> Self {
+    pub fn read() -> ConfigBuilder {
         if !PathBuf::from(NAME).exists() {
             println!("{NAME} doesn't exist..\nDefaulting to fallback values..");
-            return Self::defaults()
+            return ConfigBuilder::defaults()
         }
         
         let file = fs::File::open(NAME).unwrap();

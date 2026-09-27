@@ -118,14 +118,6 @@ impl PolicyTrait for Policy {
             None => return self
         }
     }
-
-    fn set_disable_timeout(mut self, disable: bool) -> Self {
-        if !disable { return self; }
-        
-        self.disable_timeout = disable;
-        return self
-
-    }
 }
 
 /*
@@ -135,6 +127,21 @@ impl PolicyTrait for Policy {
  * But if they called the methods from Policy, they will
  * be interacting with data in memory (not on disk)
  */
+
+impl Policy {
+    // Maybe giving defaults when new() is called isn't quite goood?
+    // But I am yet to figure this out incase of Policy
+    pub fn new() -> Self {
+        Self::defaults()
+    }
+    
+    pub fn set_disable_timeout(mut self, disable: bool) -> Self {
+        if !disable { return self; }
+        
+        self.disable_timeout = disable;
+        return self
+    }
+}
 
 impl ExecutionRequest {
     pub fn new<S: Into<OsString>>(program: S) -> ExecutionRequestBuilder {
@@ -260,15 +267,15 @@ impl ExecutionRequestBuilder {
 
     // This is used to pass multiple arguments or a Vec< >
     pub fn args<I, S>(mut self, args: I) -> Self 
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<OsString>,
-    {
-        for arg in args {
-            self.args.push(arg.into());
+        where
+            I: IntoIterator<Item = S>,
+            S: Into<OsString>,
+        {
+            for arg in args {
+                self.args.push(arg.into());
+            }
+            self
         }
-        self
-    }
     
     // This is used to get the policy so you can later set
     // the individual policy key

@@ -1,25 +1,16 @@
 # Clanix
 
-First commit of Clanix - [Cybro](https://github.com/thecybro)
+**Clanix** is the developer tool made by Clannon Labs - Cybro to make sandboxed execution and observation happen at near native speed
+with least startup time and overhead.
 
-## Examples of supported type of commands (basic for now):
-> [!NOTE]
-> The commands below are just to test *Clanix* running commands,
-> not what *Clanix* is made to do, after the very first release, *Clanix* will
-> do much more, not merely run some basic commands.
->
-> If you dont have the binary yet,
-> replace `clanix` with `cargo run` or `cargo run --` if using `-` or `--` in the command 
+**Clanix** aims to make running processes in a sandbox as simple as running normal commands
+with excellent observation and snapshots which you can compare
+with other snapshots, and see what changed.
 
-> (basic)
-- `clanix -s output.txt run cargo new project`
-> (verbose)
-- `clanix -v test`
-- `clanix -v -s output3.txt run cargo new project2`
-> (output format, not passing -f format would output a json)
-- `clanix -s test.txt -f text run cargo new prj`
-> (to write content to file)
-- `clanix -s test.txt -v -f json write "Text from Clanix" test1.txt`
-> (clear)
-- `clanix run clear`
-- 
+**Clanix** doesn't require a heavy runtime or daemon running, you can just do
+`clanix run ./binary` and have it run securely, instead of having to make sure the background
+daemon is running or having to go through alot of configuration
+
+> [!Note]
+This is the version of Clanix even before v0.0.1
+

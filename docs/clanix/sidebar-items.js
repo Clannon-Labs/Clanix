@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["NAME"],"enum":["Commands","OutputFormat"],"fn":["main"],"struct":["CliInput"]};

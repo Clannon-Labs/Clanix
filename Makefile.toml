@@ -3,6 +3,15 @@ description = "Generate documentation and copy them to global docs directory"
 workspace = false
 dependencies = ["build-docs", "copy-docs"]
 
+[tasks.doc-open]
+description = "Open the generated docs without external crates"
+workspace = false
+script_runner = "@shell"
+script = '''
+cd docs/
+python3 -m http.server
+'''
+
 [tasks.build-docs]
 description = "Step 1: Generate the documentation with no external crates"
 workspace = false

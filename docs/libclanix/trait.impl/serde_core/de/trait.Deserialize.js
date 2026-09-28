@@ -1,9 +1,0 @@
-(function() {
-    const implementors = Object.fromEntries([["libclanix",[["impl&lt;'de&gt; <a class=\"trait\" href=\"https://docs.rs/serde_core/1.0.229/serde_core/de/trait.Deserialize.html\" title=\"trait serde_core::de::Deserialize\">Deserialize</a>&lt;'de&gt; for <a class=\"struct\" href=\"libclanix/struct.Config.html\" title=\"struct libclanix::Config\">Config</a>",0],["impl&lt;'de&gt; <a class=\"trait\" href=\"https://docs.rs/serde_core/1.0.229/serde_core/de/trait.Deserialize.html\" title=\"trait serde_core::de::Deserialize\">Deserialize</a>&lt;'de&gt; for <a class=\"struct\" href=\"libclanix/struct.ExecutionRequest.html\" title=\"struct libclanix::ExecutionRequest\">ExecutionRequest</a>",0],["impl&lt;'de&gt; <a class=\"trait\" href=\"https://docs.rs/serde_core/1.0.229/serde_core/de/trait.Deserialize.html\" title=\"trait serde_core::de::Deserialize\">Deserialize</a>&lt;'de&gt; for <a class=\"struct\" href=\"libclanix/struct.ExecutionRequestBuilder.html\" title=\"struct libclanix::ExecutionRequestBuilder\">ExecutionRequestBuilder</a>",0],["impl&lt;'de&gt; <a class=\"trait\" href=\"https://docs.rs/serde_core/1.0.229/serde_core/de/trait.Deserialize.html\" title=\"trait serde_core::de::Deserialize\">Deserialize</a>&lt;'de&gt; for <a class=\"struct\" href=\"libclanix/struct.ExecutionResult.html\" title=\"struct libclanix::ExecutionResult\">ExecutionResult</a>",0],["impl&lt;'de&gt; <a class=\"trait\" href=\"https://docs.rs/serde_core/1.0.229/serde_core/de/trait.Deserialize.html\" title=\"trait serde_core::de::Deserialize\">Deserialize</a>&lt;'de&gt; for <a class=\"struct\" href=\"libclanix/struct.Policy.html\" title=\"struct libclanix::Policy\">Policy</a>",0]]]]);
-    if (window.register_implementors) {
-        window.register_implementors(implementors);
-    } else {
-        window.pending_implementors = implementors;
-    }
-})()
-//{"start":59,"fragment_lengths":[1628]}

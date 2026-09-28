@@ -1,9 +1,0 @@
-(function() {
-    const implementors = Object.fromEntries([["libclanix",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.98.1/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"struct\" href=\"libclanix/struct.Config.html\" title=\"struct libclanix::Config\">Config</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.98.1/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"struct\" href=\"libclanix/struct.ExecutionRequest.html\" title=\"struct libclanix::ExecutionRequest\">ExecutionRequest</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.98.1/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"struct\" href=\"libclanix/struct.ExecutionRequestBuilder.html\" title=\"struct libclanix::ExecutionRequestBuilder\">ExecutionRequestBuilder</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.98.1/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"struct\" href=\"libclanix/struct.ExecutionResult.html\" title=\"struct libclanix::ExecutionResult\">ExecutionResult</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.98.1/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"struct\" href=\"libclanix/struct.Policy.html\" title=\"struct libclanix::Policy\">Policy</a>",0]]]]);
-    if (window.register_implementors) {
-        window.register_implementors(implementors);
-    } else {
-        window.pending_implementors = implementors;
-    }
-})()
-//{"start":59,"fragment_lengths":[1368]}

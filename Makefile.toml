@@ -36,7 +36,7 @@ command = "cargo"
 args = ["op"]
 
 [tasks.open-docs-from-libclanix]
-description = "Open the doc from inside crates/libclanix/docs by binding to all network interfaces"
+description = "Open the doc from inside docs/libclanix by binding to all network interfaces"
 workspace = false
 script_runner = "@shell"
 script = '''
@@ -44,7 +44,7 @@ fuser -k 8080/tcp || true
 
 xdg-open "http://0.0.0.0:8080/libclanix/index.html" &
 
-python3 -m http.server --directory crates/libclanix/docs 8080 --bind 0.0.0.0
+python3 -m http.server --directory docs/libclanix 8080 --bind 0.0.0.0
 '''
 
 [tasks.copy-docs-to-libclanix]
@@ -52,7 +52,7 @@ description = "Copy the generated doc to a global docs directory"
 workspace = false
 script_runner = "@shell"
 script = '''
-mkdir -p crates/libclanix/docs
+mkdir -p docs/libclanix
 
-cp -r target/doc/* crates/libclanix/docs/
+cp -r target/doc/* docs/libclanix
 '''

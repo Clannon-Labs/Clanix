@@ -1,29 +1,58 @@
 # We already have the shorthands set in .cargo/config.toml,
 # so just use the shorthands instead of full commands
 
-[tasks.doc]
-description = "Generate documentation and copy them to global docs directory"
+# Tasks naming convention: 
+# If the task coordinates other sub tasks, it should have a one word name
+# like doc, open etc..
+# 
+# If the task does only one job, then it should have multiple word names, 
+# like build-docs, open-docs-from-target, open-docs, open-docs-from-libclanix etc
+
+[tasks.open]
+description = "Build first to ensure the changes are synced and then open"
 workspace = false
-dependencies = ["build-docs", "copy-docs"]
+dependencies = ["doc", "open-docs-from-libclanix"]
+
+[tasks.doc]
+description = "Generate documentation and copy them to docs directory inside libclanix "
+workspace = false
+dependencies = ["build-docs", "copy-docs-to-libclanix"]
 
 [tasks.build-docs]
-description = "Step 1: Generate the documentation with no external crates"
+description = "Generate the documentation with no external crates"
 workspace = false
 command = "cargo"
-args = ["d"] # shorthand
+# shorthand for `d = "doc -p libclanix --no-deps"`
+# Which is already inside .cargo/config.toml
+args = ["d"] 
 
-[tasks.copy-docs]
-description = "Step 2: Copy the generated doc to a global docs directory"
+# This is currently not used
+[tasks.open-docs-from-target]
+description = "Open the available doc from inside target/doc"
+workspace = false
+command = "cargo"
+# shorthand for `op = "doc -p libclanix --open --no-deps"`
+# Which is already inside .cargo/config.toml
+args = ["op"]
+
+[tasks.open-docs-from-libclanix]
+description = "Open the doc from inside crates/libclanix/docs by binding to all network interfaces"
 workspace = false
 script_runner = "@shell"
 script = '''
-mkdir -p docs
+fuser -k 8080/tcp || true 
 
-cp -r target/doc/* docs/
+xdg-open "http://0.0.0.0:8080/libclanix/index.html" &
+
+python3 -m http.server --directory crates/libclanix/docs 8080 --bind 0.0.0.0
 '''
 
-[tasks.doc-open]
-description = "Open the generated docs without external crates"
+[tasks.copy-docs-to-libclanix]
+description = "Copy the generated doc to a global docs directory"
 workspace = false
-command = "cargo"
-args = ["op"] # shorthand
+script_runner = "@shell"
+script = '''
+mkdir -p crates/libclanix/docs
+
+cp -r target/doc/* crates/libclanix/docs/
+'''

@@ -15,6 +15,13 @@ use std::time::Duration;
 pub trait PolicyTrait {
     fn defaults() -> Self;
 
+    fn timeout_ms(&self) -> Duration;
+    fn disable_timeout(&self) -> bool;
+    fn working_dir(&self) -> &PathBuf;
+    
+    fn set_timeout_ms(self, timeout_ms: Option<u64>) -> Self;
+    fn set_working_dir(self, working_dir: Option<PathBuf>) -> Self;
+
     /// Default timeout_ms of 1ms is just for experimentation
     /// and will be changed in future so it's more realistic
     fn default_timeout_ms() -> Duration {
@@ -29,12 +36,4 @@ pub trait PolicyTrait {
     fn default_disable_timeout() -> bool {
         false 
     }
-
-    fn timeout_ms(&self) -> Duration;
-    fn disable_timeout(&self) -> bool;
-    fn working_dir(&self) -> &PathBuf;
-    
-    fn set_timeout_ms(self, timeout_ms: Option<u64>) -> Self;
-    // fn set_disable_timeout(self, disable: bool) -> Self;
-    fn set_working_dir(self, working_dir: Option<PathBuf>) -> Self;
 }

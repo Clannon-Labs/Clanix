@@ -1,0 +1,24 @@
+# Cli client of clanix
+[package]
+name = "clanix-cli"
+version = "0.0.1"
+publish = false # This is a binary and not supposed to be published to crates.io/docs.rs
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "clanix" # The executable name (not the crate name)
+path = "src/main.rs"
+
+[dependencies]
+# Internal dependencies
+clanix.workspace = true # The core clanix library
+
+# External dependencies
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+clap = { version = "4.6.7", features = ["derive"] }
+

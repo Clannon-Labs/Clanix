@@ -1,19 +1,18 @@
+# Core clanix library
 [package]
 name = "clanix"
 version = "0.0.1"
-publish = false # This is a binary and not supposed to be published to crates.io/docs.rs
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[dependencies]
-# Internal dependencies
-libclanix.workspace = true
+[lib]
+name = "clanix" # Might not be needed but just incase
 
+[dependencies]
 # External dependencies
 serde.workspace = true
 serde_json.workspace = true
-toml.workspace = true
-clap = { version = "4.6.7", features = ["derive"] }
 
+uuid = { version = "1.26.1", features = ["v4", "serde"] }

@@ -1,12 +1,12 @@
-//! clanix is the client that uses the abstraction
-//! provided by the libclanix to do the tasks the user wants.
+//! clanix-cli is the client that uses the abstraction
+//! provided by the clanix library to do the tasks the user wants.
 //! 
 //! Clients just handles the user facing part and doesn't worry about how the actual
-//! work is done behind the scenes by libclanix.
+//! work is done behind the scenes by clanix.
 //! 
-//! Clients can design the user facing api/commands however they want and libclanix doesn't
+//! Clients can design the user facing api/commands however they want and clanix doesn't
 //! care about any of that, all the client needs to do is use the structs/methods provided
-//! by libclanix, doesn't matter how client wants to use them to make the user facing cli
+//! by clanix, doesn't matter how client wants to use them to make the user facing cli
 //! or whatever the client does
 
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ use std::fs;
 use serde_json;
 use toml;
 
-use libclanix::{
+use clanix::{
     Config,
     PolicyTrait,
     ExecutionResult,

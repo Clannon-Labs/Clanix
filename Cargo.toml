@@ -1,13 +1,13 @@
 [workspace]
 resolver = "3"
 members = [
-    'crates/libclanix',
     'crates/clanix',
+    'crates/clanix-cli',
 ]
 
 default-members = [
-    'crates/libclanix',
     'crates/clanix',
+    'crates/clanix-cli',
 ]
 
 [workspace.package]
@@ -18,7 +18,7 @@ repository = "https://github.com/Clannon-Labs/Clanix"
 
 [workspace.dependencies]
 # Internal dependencies
-libclanix = { path = "crates/libclanix" }
+clanix = { path = "crates/clanix" }
 
 # External dependencies
 serde = { version = "1.0.229", features = ["derive"] }

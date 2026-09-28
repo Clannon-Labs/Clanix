@@ -1,4 +1,4 @@
-//! libclanix is the core library that does the actual job behind the scenes.
+//! clanix is the core library that does the actual job behind the scenes.
 //!  
 //! Policy is the in-memory config of the rules/policies we set for the processes
 //! and Config is the persistent version.
@@ -37,8 +37,10 @@ use uuid::Uuid;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 // Custom crates
-pub use config::Config; // Export so it is usable from outside
-pub use shared::PolicyTrait; // Export + use it here
+pub use config::Config; // Export so it is usable from outside + use it here
+pub use shared::PolicyTrait;
+
+// use crate::config::ConfigBuilder; // Export + use it here
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
@@ -118,22 +120,40 @@ impl PolicyTrait for Policy {
     }
     
     fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+        /*
+         * If user gives the timeout_ms, which makes disable: true,
+         * set the timeout_ms for now to that.
+         * If not, read the timeout_ms from config and set the
+         * timeout_ms to that
+         */
         match timeout_ms {
             Some(millis) => {
                 self.timeout_ms = Duration::from_millis(millis);
                 return self
             },
-            None => return self
+            None => {
+                self.timeout_ms = Config::read().timeout_ms();
+                return self
+            }
         }
     }
 
     fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Self {
+        /*
+         * If user gives the working_dir, which makes disable: true,
+         * set the working_dir for now to that.
+         * If not, read the working_dir from config and set the
+         * working_dir to that
+         */
         match working_dir {
             Some(dir) => {
                 self.working_dir = dir;
                 return self
             },
-            None => return self
+            None => {
+                self.working_dir = Config::read().working_dir().clone();
+                return self
+            }
         }
     }
 }
@@ -154,7 +174,16 @@ impl Policy {
     }
     
     pub fn set_disable_timeout(mut self, disable: bool) -> Self {
-        if !disable { return self; }
+        /*
+         * If user gives the disable_timeout, which makes disable: true,
+         * set the disable_timeout for now to that.
+         * If not, read the disable_timeout from config and set the
+         * disable_timeout to that
+         */
+        if !disable {
+            self.disable_timeout = Config::read().disable_timeout();
+            return self
+        }
         
         self.disable_timeout = disable;
         return self

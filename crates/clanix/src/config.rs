@@ -38,15 +38,22 @@ pub struct ConfigBuilder {
 
 
 impl Config {
-     /// Incase of Config, new() gives the new instance of what already exists on disk,
-     /// you can call defaults() on ConfigBuilder if you explicitly want defaults
-     /// 
-     /// The reason behind keeping 2 functions however; is clarity
+     /* Incase of Config, new() gives the new instance of what already exists on disk,
+     * you can call defaults() on ConfigBuilder if you explicitly want the instance with
+     * defaults
+     * 
+     * Also there are 2 identical methods where both do `ConfigBuilder::read()`
+     * These are here just for the sake of clarity and I might remove it in future 
+     */
      
     pub fn new() -> ConfigBuilder {
         ConfigBuilder::read()
     }
 
+    pub fn read() -> ConfigBuilder {
+        ConfigBuilder::read()
+    }
+    
     pub fn set_default() -> ConfigBuilder {
         ConfigBuilder::set_default()
     }

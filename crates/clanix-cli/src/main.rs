@@ -16,7 +16,7 @@ use std::fs;
 use serde_json;
 use toml;
 
-use clanix_core::{
+use libclanix::{
     Config,
     PolicyTrait,
     ExecutionResult,

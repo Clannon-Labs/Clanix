@@ -8,7 +8,7 @@ repository.workspace = true
 
 [dependencies]
 # Internal dependencies
-clanix-core.workspace = true
+libclanix.workspace = true
 
 # External dependencies
 serde.workspace = true

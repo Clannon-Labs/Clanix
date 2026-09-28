@@ -1,0 +1,6 @@
+[alias]
+
+# To include just the core library while generating docs
+d = "doc -p libclanix --no-deps"
+
+op = "doc -p libclanix --open --no-deps"

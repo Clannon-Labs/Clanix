@@ -1,12 +1,12 @@
-//! clanix-cli is the client that uses the abstraction
-//! provided by the core to do the tasks the user wants.
+//! clanix is the client that uses the abstraction
+//! provided by the libclanix to do the tasks the user wants.
 //! 
 //! Clients just handles the user facing part and doesn't worry about how the actual
-//! work is done behind the scenes by clanix-core.
+//! work is done behind the scenes by libclanix.
 //! 
-//! Clients can design the user facing api/commands however they want and core doesn't
+//! Clients can design the user facing api/commands however they want and libclanix doesn't
 //! care about any of that, all the client needs to do is use the structs/methods provided
-//! by the core, doesn't matter how client wants to use them to make the user facing cli
+//! by libclanix, doesn't matter how client wants to use them to make the user facing cli
 //! or whatever the client does
 
 use std::path::PathBuf;
@@ -43,17 +43,29 @@ struct CliInput {
     /// To change the configs, you have to use `clanix config`
 
     /// The directory the operation actually happens
-    #[arg(long = "working-dir", visible_alias = "wd" )] 
+    #[arg(
+        long = "working-dir",
+        visible_alias = "wd",
+        help = "The directory for this one operation"
+    )] 
     working_dir: Option<PathBuf>,
 
     /// Option to enable/to disable verbosity.
     /// Having this enabled means clanix will give you more
     /// detailed/verbose outputs everywhere
-    #[arg(short, long)]
+    #[arg(
+        short,
+        long,
+        help = "Use this flag to get a more detailed/verbose output from clanix"
+    )]
     verbose: bool,
 
     /// Whether or not user wants to save/snapshot the output to a file
-    #[arg(short, long)]
+    #[arg(
+        short,
+        long,
+        help = "The directory to save the snapshot to (if you use this flag)"
+    )]
     snapshot: Option<PathBuf>, // Use -s filename to snapshot output to a file
 
     /// What format does the user want to save their snapshot..
@@ -63,7 +75,8 @@ struct CliInput {
         long = "format",
         requires = "snapshot",
         value_enum,
-        default_value_t = OutputFormat::Json
+        default_value_t = OutputFormat::Json,
+        help = "What format do you want your snapshots to be"
     )]
     output_format: OutputFormat,
 
@@ -71,11 +84,19 @@ struct CliInput {
     /// You can use --dt true to disable whatever timeout you had set
     /// And you can use --dt false to enable (or not disable) the timeout
     /// you have
-    #[arg(long = "disable-timeout", visible_alias = "dt")]
+    #[arg(
+        long = "disable-timeout",
+        visible_alias = "dt",
+        help = "Use this flag to disable the timeout you have saved; for one operation"
+    )]
     disable_timeout: bool,
 
     /// The actual timeout you want to set
-    #[arg(short, long)]
+    #[arg(
+        short,
+        long,
+        help = "The actual timeout you want to set"
+    )]
     timeout: Option<u64>,
 }
 

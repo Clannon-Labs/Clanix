@@ -2,12 +2,12 @@
 resolver = "3"
 members = [
     'crates/libclanix',
-    'crates/clanix-cli',
+    'crates/clanix',
 ]
 
 default-members = [
     'crates/libclanix',
-    'crates/clanix-cli',
+    'crates/clanix',
 ]
 
 [workspace.package]

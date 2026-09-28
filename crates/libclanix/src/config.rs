@@ -47,8 +47,8 @@ impl Config {
         ConfigBuilder::read()
     }
 
-    pub fn set_default(default: bool) -> ConfigBuilder {
-        ConfigBuilder::set_default(default)
+    pub fn set_default() -> ConfigBuilder {
+        ConfigBuilder::set_default()
     }
     
 }
@@ -103,13 +103,8 @@ impl ConfigBuilder {
     /// sets the default in config(disk) and return
     /// ConfigBuilder, if not, it just returns ConfigBuilder
     /// without making change in disk/config
-    pub fn set_default(default: bool) -> Self {
-        if default {
-            Self::defaults()
-                .generate()
-        } else {
-            Self::defaults()
-        }
+    pub fn set_default() -> Self {
+        Self::defaults().generate()
     }
 
     pub fn set_disable_timeout(mut self, disable: Option<bool>) -> Self {

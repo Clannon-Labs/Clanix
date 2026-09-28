@@ -103,7 +103,7 @@ struct CliInput {
 /// The commands available to use
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// A basic command you can use to run something (not even a prototype yet)
+    /// A basic command you can use to run something inside clanix
     Run { 
         program: String,
         args: Vec<String>,
@@ -123,9 +123,21 @@ enum Commands {
     /// 
     /// Cli can just change the config for any one operation only
     Config {
-        #[arg(short, long = "default", visible_alias = "init" )]
-        default: bool,
-        
+        #[command(subcommand)]
+        configcommand: ConfigCommands,
+    }
+}
+
+#[derive(Subcommand, Debug)]
+enum ConfigCommands {
+    #[command(about = "Set the config back to the default (use carefully")]
+    Default,
+
+    #[command(about = "Initialize the clanix project")]
+    Init,
+
+    #[command(about = "Set/change the config values")]
+    Set {
         #[arg(long = "disable-timeout", visible_alias = "dt")]
         disable_timeout: Option<bool>,
 
@@ -253,8 +265,7 @@ fn main() {
             result.set_status(Some(101));
             result.set_stderr("".to_string());
         },
-        Commands::Config { disable_timeout, timeout_ms, working_dir, default } => {
-            
+        Commands::Config {configcommand} => {
             /*
              * The core could technically be able to set the config to default if
              * we called .set_default() at the end of the chain but it would be 
@@ -263,33 +274,39 @@ fn main() {
              */
             
             // println!("{disable_timeout:?}, {timeout_ms:?}, {working_dir:?}");
-            if default {
-                let config = Config::set_default(default);
-
-                // println!("{config:?}");
-                if verbose {
-                    let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
-                    println!("{message}");
-                    result.set_stdout(message);
-                } else {
-                    let message = format!("{NAME}: Successfully set the config.\n");
-                    println!("{message}");
-                    result.set_stdout(message);
-                }
-            } else {
-                let config = Config::new()
-                    .set_disable_timeout(disable_timeout)
-                    .set_timeout_ms(timeout_ms)
-                    .set_working_dir(working_dir);
-                
-                if verbose {
-                    let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
-                    println!("{message}");
-                    result.set_stdout(message);
-                } else {
-                    let message = format!("{NAME}: Successfully set the config.\n");
-                    println!("{message}");
-                    result.set_stdout(message);
+            match configcommand {
+                ConfigCommands::Default => {
+                    let config = Config::set_default();
+    
+                    // println!("{config:?}");
+                    if verbose {
+                        let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
+                        println!("{message}");
+                        result.set_stdout(message);
+                    } else {
+                        let message = format!("{NAME}: Successfully set the config.\n");
+                        println!("{message}");
+                        result.set_stdout(message);
+                    }
+                },
+                ConfigCommands::Init => {
+                    println!("Init is not developed yet!")
+                },
+                ConfigCommands::Set {disable_timeout, timeout_ms, working_dir} => {
+                    let config = Config::new()
+                        .set_disable_timeout(disable_timeout)
+                        .set_timeout_ms(timeout_ms)
+                        .set_working_dir(working_dir);
+                    
+                    if verbose {
+                        let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
+                        println!("{message}");
+                        result.set_stdout(message);
+                    } else {
+                        let message = format!("{NAME}: Successfully set the config.\n");
+                        println!("{message}");
+                        result.set_stdout(message);
+                    }
                 }
             }
 

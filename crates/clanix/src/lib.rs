@@ -121,7 +121,7 @@ impl PolicyTrait for Policy {
     
     fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
         /*
-         * If user gives the timeout_ms, which makes disable: true,
+         * If user gives the timeout_ms, which makes timeout_ms: Some(),
          * set the timeout_ms for now to that.
          * If not, read the timeout_ms from config and set the
          * timeout_ms to that
@@ -140,7 +140,7 @@ impl PolicyTrait for Policy {
 
     fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Self {
         /*
-         * If user gives the working_dir, which makes disable: true,
+         * If user gives the working_dir, which makes working_dir: Some(),
          * set the working_dir for now to that.
          * If not, read the working_dir from config and set the
          * working_dir to that

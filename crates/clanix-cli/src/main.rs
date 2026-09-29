@@ -146,6 +146,18 @@ enum ConfigCommands {
 
         #[arg(long = "working-dir", visible_alias = "wd" )]
         working_dir: Option<PathBuf>,
+    },
+
+    #[command(about = "Get the values you have in config")]
+    What {
+        #[arg(long = "disable-timeout", visible_alias = "dt")]
+        disable_timeout: bool,
+
+        #[arg(short, long)]
+        timeout_ms: bool,
+
+        #[arg(long = "working-dir", visible_alias = "wd" )]
+        working_dir: bool,
     }
 }
 
@@ -306,6 +318,18 @@ fn main() {
                         let message = format!("{NAME}: Successfully set the config.\n");
                         println!("{message}");
                         result.set_stdout(message);
+                    }
+                },
+                ConfigCommands::What{disable_timeout, timeout_ms, working_dir} => {
+                    let config = Config::read();
+                    if disable_timeout {
+                        println!("{}", config.disable_timeout())
+                    } else if timeout_ms {
+                        println!("{:?}", config.timeout_ms())
+                    } else if working_dir {
+                        println!("{:?}", config.working_dir())
+                    } else {
+                        println!("{:?}", config)
                     }
                 }
             }

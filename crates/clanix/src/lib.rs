@@ -354,9 +354,16 @@ impl ExecutionResult {
     // callers expect; with no breaking changes
 
     pub fn defaults(working_dir: &Option<PathBuf>) -> Self {
+        /*
+         * If user/client gave working dir, then use it for this run,
+         * if not, read the working dir set in config and put that as default 
+         * for this run
+         */
         let directory = match working_dir {
             Some(dir) => dir.clone(),
-            None => Policy::default_working_dir()
+            None => {
+                Config::read().working_dir().clone() // I gotta do something about these clones man..
+            }
         };
         
         Self {

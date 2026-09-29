@@ -104,15 +104,18 @@ struct CliInput {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// A basic command you can use to run something inside clanix
+    #[command(about = "A basic command you can use to run something inside clanix")]
     Run { 
         program: String,
         args: Vec<String>,
     },
 
     /// Just simulates test for now, we can put actual testing in future
+    #[command(about = "Just simulates test for now, we can put actual testing in future")]
     Test,
 
     /// To write some content to disk
+    #[command(about = "To write some content to disk")]
     Write {
         content: String,
         path: PathBuf
@@ -122,6 +125,8 @@ enum Commands {
     /// set by core, cli doesn't do it itself.
     /// 
     /// Cli can just change the config for any one operation only
+    /// unless you explicitly call the 'default' and 'set' commands
+    #[command(about = "Command to manage config. Run clanix config --help to get more info")]
     Config {
         #[command(subcommand)]
         configcommand: ConfigCommands,
@@ -136,27 +141,51 @@ enum ConfigCommands {
     #[command(about = "Initialize the clanix project")]
     Init,
 
-    #[command(about = "Set/change the config values")]
+    #[command(about = "Set/change individual config value.")]
     Set {
-        #[arg(long = "disable-timeout", visible_alias = "dt")]
+        #[arg(
+            long = "disable-timeout",
+            visible_alias = "dt",
+            help = "Change/set the config value stored in disable_timeout"
+        )]
         disable_timeout: Option<bool>,
 
-        #[arg(short, long)]
+        #[arg(
+            short, 
+            long,
+            help = "Change/set the config value stored in timeout_ms"
+        )]
         timeout_ms: Option<u64>,
 
-        #[arg(long = "working-dir", visible_alias = "wd" )]
+        #[arg(
+            long = "working-dir",
+            visible_alias = "wd",
+            help = "Change/set the config value stored in working_dir"
+        )]
         working_dir: Option<PathBuf>,
     },
 
-    #[command(about = "Get the values you have in config")]
+    #[command(about = "Get the values you have in config.")]
     What {
-        #[arg(long = "disable-timeout", visible_alias = "dt")]
+        #[arg(
+            long = "disable-timeout",
+            visible_alias = "dt",
+            help = "Get the config value stored in disable_timeout"
+        )]
         disable_timeout: bool,
 
-        #[arg(short, long)]
+        #[arg(
+            short, 
+            long,
+            help = "Get the config value stored in timeout_ms"
+        )]
         timeout_ms: bool,
 
-        #[arg(long = "working-dir", visible_alias = "wd" )]
+        #[arg(
+            long = "working-dir",
+            visible_alias = "wd",
+            help = "Get the config value stored in working_dir"
+        )]
         working_dir: bool,
     }
 }

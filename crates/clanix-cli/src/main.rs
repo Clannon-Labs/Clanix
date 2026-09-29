@@ -9,16 +9,19 @@
 //! by clanix, doesn't matter how client wants to use them to make the user facing cli
 //! or whatever the client does
 
+mod run;
+mod config;
+mod snapshot;
+mod write;
+mod test;
+
 use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use serde_json;
-use toml;
 
 use clanix::{
-    Config,
-    PolicyTrait,
+    // Config,
+    // PolicyTrait,
     ExecutionResult,
     ExecutionRequest,
 };
@@ -221,177 +224,23 @@ fn main() {
                 .set_working_dir(working_dir)
                 .execute()
                 .unwrap();
-            
-            // println!("Execution {} was just ran", &result.id());
-            
-            let args = args.join(" ");
 
-            let stdout_output = &result.stdout_string();
-            let stderr_output = &result.stderr_string();
-            
-            // We display stdout incase of success and stderr incase of failure
-            // But some commands might run successfully but put the content in stderr
-            // so we check if there's anything on stderr incase we find stdout empty 
-            // even incase of success
-            if result.success() {
-                let output = if !stdout_output.trim().is_empty() {
-                    stdout_output
-                } else {
-                    stderr_output
-                };
-                
-                let final_output = output.clone().into_owned();
-                if verbose {
-                    let message = format!("{NAME}: Command {program} {args} was ran successfully!\n{final_output}\n");
-                    println!("{message}");
-                    result.set_stdout(message);
-                } else {
-                    let message = format!("{NAME}: {program} {args} was successful!\n{final_output}\n");
-                    println!("{message}");
-                    result.set_stdout(message)
-                }
-            } else {
-                let output = if !stderr_output.trim().is_empty() {
-                    stderr_output
-                } else {
-                    stdout_output
-                };
-
-                let final_output = output.clone().into_owned();
-                if verbose {
-                    let message = format!("{NAME}: Command {program} {args} failed!\n{output}\n");
-                    eprintln!("{message}");
-                    result.set_stderr(final_output)
-                } else {
-                    let message = format!("{NAME}: {program} {args} failed!\n{output}\n");
-                    eprintln!("{message}");
-                    result.set_stderr(final_output)
-                }
-            }
-
-            // result.success = result.success();
-            // result.code = result.status();
+            run::handle_run(&mut result, program, args, verbose);
         }
         Commands::Test => {
-            if verbose {
-                let message = format!("{NAME} [SIMULATED]: Request to run tests was successful\n");
-                println!("{message}");
-                result.set_stdout(message);
-            } else {
-                let message = "[SIMULATED]: Tests successful!".to_string();
-                println!("{message}");
-                result.set_stdout(message);
-            }
-
-            result.set_success(true);
-            result.set_status(Some(101));
-            result.set_stderr("".to_string());
+            test::handle_test(&mut result, verbose);
         }
         Commands::Write { content, path } => {
-            fs::write(&path, &content).unwrap(); // Replace later
-
-            if verbose {
-                let message = format!(
-                    "{NAME} [SIMULATED]: Request to write the content '{content}' to {path:?} was successful\n"
-                );
-                println!("{message}");
-                result.set_stdout(message);
-            } else {
-                let message = "[SIMULATED]: Wrote to {path:?}".to_string();
-                println!("{message}");
-                result.set_stdout(message);
-            }
-
-            result.set_success(true);
-            result.set_status(Some(101));
-            result.set_stderr("".to_string());
+            write::handle_write(&mut result, verbose, path, content);
         },
         Commands::Config {configcommand} => {
-            /*
-             * The core could technically be able to set the config to default if
-             * we called .set_default() at the end of the chain but it would be 
-             * a waste of resources, so we check the condition and set to default if
-             * user wants so
-             */
-            
-            // println!("{disable_timeout:?}, {timeout_ms:?}, {working_dir:?}");
-            match configcommand {
-                ConfigCommands::Default => {
-                    let config = Config::set_default();
-    
-                    // println!("{config:?}");
-                    if verbose {
-                        let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
-                        println!("{message}");
-                        result.set_stdout(message);
-                    } else {
-                        let message = format!("{NAME}: Successfully set the config.\n");
-                        println!("{message}");
-                        result.set_stdout(message);
-                    }
-                },
-                ConfigCommands::Init => {
-                    println!("Init is not developed yet!")
-                },
-                ConfigCommands::Set {disable_timeout, timeout_ms, working_dir} => {
-                    let config = Config::new()
-                        .set_disable_timeout(disable_timeout)
-                        .set_timeout_ms(timeout_ms)
-                        .set_working_dir(working_dir);
-                    
-                    if verbose {
-                        let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
-                        println!("{message}");
-                        result.set_stdout(message);
-                    } else {
-                        let message = format!("{NAME}: Successfully set the config.\n");
-                        println!("{message}");
-                        result.set_stdout(message);
-                    }
-                },
-                ConfigCommands::What{disable_timeout, timeout_ms, working_dir} => {
-                    let config = Config::read();
-                    if disable_timeout {
-                        println!("{}", config.disable_timeout())
-                    } else if timeout_ms {
-                        println!("{:?}", config.timeout_ms())
-                    } else if working_dir {
-                        println!("{:?}", config.working_dir())
-                    } else {
-                        println!("{:?}", config)
-                    }
-                }
-            }
-
-            result.set_success(true);
-            result.set_status(Some(101));
-            result.set_stderr("".to_string());
+            config::handle_config(&mut result, configcommand, verbose);
         }
     }
 
     match snapshot {
         Some(path) => {
-            match output_format {
-                // No verbose check because inside the match command block,
-                // each command already wrote their verbose output
-                OutputFormat::Text => {
-                    let final_path = result.working_dir().join(path);
-                    fs::write(&final_path, &result.stdout()).unwrap();
-                    println!("Wrote stdout to {final_path:?}")
-                },
-                OutputFormat::Json => {
-                    let final_path = result.working_dir().join(path);
-                    let output = serde_json::to_string_pretty(&result).unwrap();
-                    fs::write(&final_path, &output).unwrap();
-                    println!("Wrote stdout to {final_path:?}")
-                }
-                OutputFormat::Toml => {
-                    let final_path = result.working_dir().join(path);
-                    let output = toml::to_string_pretty(&result).unwrap();
-                    fs::write(&final_path, &output).unwrap();
-                    println!("Wrote stdout to {final_path:?}")
-                }
-            }
+            snapshot::handle_snapshot(&mut result, path, output_format);
         }
         None => {}
     }

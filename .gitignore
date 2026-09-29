@@ -1,8 +1,5 @@
 /target
 # *.txt
-test.*
-/test*/
-test*.*
 /prj/
 /project*/
 output*.*
@@ -11,6 +8,7 @@ output*.*
 
 # build.sh
 clanix.json
+smt.*
 
 /temp/
 draft*.*

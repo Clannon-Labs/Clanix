@@ -7,16 +7,17 @@ use clanix::ExecutionResult;
 use crate::NAME;
 
 pub fn handle_write(result: &mut ExecutionResult, verbose: bool, path: PathBuf, content: String) {
-    fs::write(&path, &content).unwrap(); // Replace later
+    let final_path = result.working_dir().join(path);
+    fs::write(&final_path, &content).unwrap(); // Replace later
 
     if verbose {
         let message = format!(
-            "{NAME} [SIMULATED]: Request to write the content '{content}' to {path:?} was successful\n"
+            "{NAME} [SIMULATED]: Request to write the content '{content}' to {final_path:?} was successful\n"
         );
         println!("{message}");
         result.set_stdout(message);
     } else {
-        let message = format!("[SIMULATED]: Wrote to {path:?}");
+        let message = format!("[SIMULATED]: Wrote to {final_path:?}");
         println!("{message}");
         result.set_stdout(message);
     }

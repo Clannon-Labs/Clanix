@@ -213,7 +213,7 @@ fn main() {
         working_dir
     } = CliInput::parse();
 
-    let mut result = ExecutionResult::defaults(&working_dir);
+    let mut result = ExecutionResult::defaults();
 
     match command {
         Commands::Run { program, args } => {

@@ -1,28 +1,33 @@
 
 use std::io::Read;
 use std::sync::mpsc;
-use std::borrow::Cow;
-use std::time::{Instant, Duration};
 use std::path::PathBuf;
 use std::ffi::OsString;
-
-use std::{
-    process::{
-        Command,
-        Stdio,
-    }
-};
+use std::process::{Command, Stdio};
+use std::time::{Instant, Duration};
 
 use uuid::Uuid;
+use serde::{Serialize, Deserialize};
 
 use crate::Policy;
-use crate::shared::PolicyTrait;
-use crate::config::Config;
-use crate::{
-  ExecutionRequest,
-  ExecutionRequestBuilder,
-  ExecutionResult,
-};
+use crate::PolicyTrait;
+
+use super::ExecutionResult;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionRequest {
+    pub(super) program: OsString,
+    pub(super) args: Vec<OsString>,
+    pub(super) policy: Policy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionRequestBuilder {
+    pub(super) program: OsString,
+    pub(super) args: Vec<OsString>,
+    pub(super) policy: Policy,
+}
+
 
 impl ExecutionRequest {
     pub fn new<S: Into<OsString>>(program: S) -> ExecutionRequestBuilder {
@@ -41,15 +46,15 @@ impl ExecutionRequestBuilder {
     // It consumes the request after you call execute,
     // so you have to create a new request if you want
     // to call execute again
-    pub fn execute(&self) -> Result<ExecutionResult, String> {
+    pub fn execute(self) -> Result<ExecutionResult, String> {
         /*
             * Change all the panic creating .expect()s with proper
             * error handling later
             */
 
-        let working_dir = &self.policy.working_dir;
-        let timeout_ms = self.policy.timeout_ms;
-        let disable_timeout = self.policy.disable_timeout;
+        let working_dir = &self.policy.working_dir();
+        let timeout_ms = self.policy.timeout_ms();
+        let disable_timeout = self.policy.disable_timeout();
 
         // println!("Current working directory is {:?}", &working_dir);
         // println!("Timeout_ms: {:?}", timeout_ms);
@@ -137,7 +142,7 @@ impl ExecutionRequestBuilder {
             status: exit_status.code(),
             stdout: captured_stdout,
             stderr: captured_stderr,
-            working_dir: self.policy.working_dir.clone(),
+            working_dir: self.policy.working_dir().clone()
         })
     }
     
@@ -175,86 +180,5 @@ impl ExecutionRequestBuilder {
     pub fn set_working_dir(mut self, directory: Option<PathBuf>) -> Self {
         self.policy = Policy::set_working_dir(self.policy, directory);
         self
-    }
-}
-
-impl ExecutionResult {
-    // These simple methods exist for the caller to call,
-    // because the internal structure might change and
-    // if the caller calls the internal elements directly,
-    // it could break,
-    // so calling these methods is safer because these will
-    // translate whatever was changed internally into what the
-    // callers expect; with no breaking changes
-
-    pub fn defaults(working_dir: &Option<PathBuf>) -> Self {
-        /*
-            * If user/client gave working dir, then use it for this run,
-            * if not, read the working dir set in config and put that as default 
-            * for this run
-            */
-        let directory = match working_dir {
-            Some(dir) => dir.clone(),
-            None => {
-                Config::read().working_dir().clone() // I gotta do something about these clones man..
-            }
-        };
-        
-        Self {
-            id: Uuid::new_v4(),
-            success: false,
-            status: None,
-            stdout: vec![],
-            stderr: vec![],
-            working_dir: directory
-        }
-    }
-
-    pub fn id(&self) -> &Uuid {
-        &self.id
-    }
-
-    pub fn working_dir(&self) -> &PathBuf {
-        &self.working_dir
-    }
-    
-    pub fn success(&self) -> bool {
-        self.success
-    }
-    
-    pub fn status(&self) -> Option<i32> {
-        self.status
-    }
-
-    pub fn stdout(&self) -> &[u8] {
-        &self.stdout
-    }
-
-    pub fn stdout_string(&self) -> Cow<'_, str> {
-        String::from_utf8_lossy(&self.stdout)
-    }
-
-    pub fn stderr(&self) -> &[u8]  {
-        &self.stderr
-    }
-
-    pub fn stderr_string(&self) -> Cow<'_, str> {
-        String::from_utf8_lossy(&self.stderr)
-    }
-
-    pub fn set_success(&mut self, new_success: bool) {
-        self.success = new_success
-    }
-
-    pub fn set_status(&mut self, new_status: Option<i32>) {
-        self.status = new_status
-    }
-    
-    pub fn set_stdout(&mut self, new_stdout: String) {
-        self.stdout = new_stdout.into_bytes()
-    }
-
-    pub fn set_stderr(&mut self, new_stderr: String) {
-        self.stderr = new_stderr.into_bytes()
     }
 }

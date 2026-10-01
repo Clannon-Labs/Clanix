@@ -18,14 +18,15 @@
 //! actually use the data to do some operation
 
 mod config;
-mod shared;
+// mod shared;
 mod execution;
 mod policy;
+mod environment;
 
 
 // Custom crates
-pub use config::Config; // Export so it is usable from outside + use it here
-pub use shared::PolicyTrait;
-pub use execution::*;
 pub use policy::*;
+pub use config::*;
+pub use execution::*;
 
+pub use environment::*;

@@ -1,17 +1,16 @@
 
 use std::time::Duration;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 
 use serde::{Serialize, Deserialize};
 
 use crate::config::Config;
-use crate::shared::PolicyTrait;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
-    disable_timeout: bool,
-    timeout_ms: Duration,
-    working_dir: PathBuf,
+    pub(crate) disable_timeout: bool,
+    pub(crate) timeout_ms: Duration,
+    pub(crate) working_dir: PathBuf,
 }
 
 /*
@@ -19,28 +18,34 @@ pub struct Policy {
  * so if you want to make the change persistent, aka change 
  * in disk, you MUST call the Config methods, not Policy ones
  */
-impl PolicyTrait for Policy {
-    fn defaults() -> Self {
+impl Policy {
+    pub fn defaults() -> Self {
         Self {
-            disable_timeout: Self::default_disable_timeout(),
-            timeout_ms: Self::default_timeout_ms(),
-            working_dir: Self::default_working_dir(),
+            disable_timeout: Config::default_disable_timeout(),
+            timeout_ms: Config::default_timeout_ms(),
+            working_dir: Config::default_working_dir(),
         }
     }
 
-    fn timeout_ms(&self) -> Duration {
+    // Just an alias for defaults()
+    pub fn new() -> Self {
+        Self::defaults()
+    }
+
+
+    pub fn timeout_ms(&self) -> Duration {
         self.timeout_ms
     }
     
-    fn disable_timeout(&self) -> bool {
+    pub fn disable_timeout(&self) -> bool {
         self.disable_timeout
     }
     
-    fn working_dir(&self) -> &PathBuf {
+    pub fn working_dir(&self) -> &Path {
         &self.working_dir
     }
     
-    fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
         /*
          * If user gives the timeout_ms, which makes timeout_ms: Some(),
          * set the timeout_ms for now to that.
@@ -59,7 +64,7 @@ impl PolicyTrait for Policy {
         }
     }
 
-    fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Self {
+    pub fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Self {
         /*
          * If user gives the working_dir, which makes working_dir: Some(),
          * set the working_dir for now to that.
@@ -76,22 +81,6 @@ impl PolicyTrait for Policy {
                 return self
             }
         }
-    }
-}
-
-/*
- * User would call the methods from Config to interact
- * with the config file on disk
- * 
- * But if they called the methods from Policy, they will
- * be interacting with data in memory (not on disk)
- */
-
-impl Policy {
-    // Maybe giving defaults when new() is called isn't quite goood?
-    // But I am yet to figure this out incase of Policy
-    pub fn new() -> Self {
-        Self::defaults()
     }
 
     pub fn set_disable_timeout(mut self, disable: bool) -> Self {
@@ -110,3 +99,4 @@ impl Policy {
         return self
     }
 }
+

@@ -22,8 +22,9 @@ use serde::{Deserialize, Serialize};
 use clanix::{
     // Config,
     // PolicyTrait,
-    ExecutionResult,
-    ExecutionRequest,
+    // ExecutionResult,
+    // ExecutionRequest,
+    ExecutionEnvironment
 };
 
 const NAME: &str = "Clanix";
@@ -213,11 +214,11 @@ fn main() {
         working_dir
     } = CliInput::parse();
 
-    let mut result = ExecutionResult::defaults();
+    let mut result = ExecutionEnvironment::result();
 
     match command {
         Commands::Run { program, args } => {
-            result = ExecutionRequest::new(&program)
+            result = ExecutionEnvironment::request(&program)
                 .args(&args)
                 .set_disable_timeout(disable_timeout)
                 .set_timeout_ms(timeout)

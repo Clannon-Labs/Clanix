@@ -6,16 +6,15 @@
 //! 
 //! It shares the same PolicyTrait trait as policy
 
+use std::fs;
+use std::env;
 use std::io::BufReader;
 use std::path::PathBuf;
-use std::fs;
 use std::time::Duration;
+
 use serde::{Serialize, Deserialize};
 use serde_json;
 
-use super::{
-    shared::PolicyTrait,
-};
 
 const NAME: &str = "clanix.json";
 
@@ -24,9 +23,9 @@ const NAME: &str = "clanix.json";
 /// about the internal messy structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    disable_timeout: bool,
-    timeout_ms: Duration,
-    working_dir: PathBuf,
+    pub(crate) disable_timeout: bool,
+    pub(crate) timeout_ms: Duration,
+    pub(crate) working_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,59 +56,38 @@ impl Config {
     pub fn set_default() -> ConfigBuilder {
         ConfigBuilder::set_default()
     }
+
+    /// Default timeout_ms of 1ms is just for experimentation
+    /// and will be changed in future so it's more realistic
+    pub fn default_timeout_ms() -> Duration {
+        Duration::from_millis(1)
+    }
     
+    pub fn default_working_dir() -> PathBuf {
+        env::current_dir().unwrap() // replace this .unwrap() later
+    }
+
+    /// timeout is enabled (or not disabled) by default
+    pub fn default_disable_timeout() -> bool {
+        false 
+    }    
 }
 
-/*
- * Call of any method of Config changes persistent state, aka on disk
- */
-impl PolicyTrait for ConfigBuilder {
-    fn defaults() -> Self {
-        Self {
-            disable_timeout: ConfigBuilder::default_disable_timeout(),
-            timeout_ms: ConfigBuilder::default_timeout_ms().as_millis(),
-            working_dir: ConfigBuilder::default_working_dir() 
-        }
-    }
-
-    fn timeout_ms(&self) -> Duration {
-        Duration::from_millis(self.timeout_ms as u64)
-    }
-    
-    fn disable_timeout(&self) -> bool {
-        self.disable_timeout
-    }
-    
-    fn working_dir(&self) -> &PathBuf {
-        &self.working_dir
-    }
-    
-    fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
-        match timeout_ms {
-            Some(timeout) => {
-                self.timeout_ms = timeout as u128;
-                self.generate() // make changes to disk
-            },
-            None => return self
-        }
-    }
-
-    fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Self {
-        match working_dir {
-            Some(dir) => {
-                self.working_dir = dir;
-                self.generate() // make changes to disk
-            },
-            None => return self
-        }
-    }
-}
 
 impl ConfigBuilder {
     /// If user passed default: true, set_default()
     /// sets the default in config(disk) and return
     /// ConfigBuilder, if not, it just returns ConfigBuilder
     /// without making change in disk/config
+
+    pub fn defaults() -> Self {
+        Self {
+            disable_timeout: Config::default_disable_timeout(),
+            timeout_ms: Config::default_timeout_ms().as_millis(),
+            working_dir: Config::default_working_dir() 
+        }
+    }
+    
     pub fn set_default() -> Self {
         Self::defaults().generate()
     }
@@ -124,6 +102,38 @@ impl ConfigBuilder {
         }
     }
 
+    pub fn timeout_ms(&self) -> Duration {
+        Duration::from_millis(self.timeout_ms as u64)
+    }
+    
+    pub fn disable_timeout(&self) -> bool {
+        self.disable_timeout
+    }
+    
+    pub fn working_dir(&self) -> &PathBuf {
+        &self.working_dir
+    }
+    
+    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+        match timeout_ms {
+            Some(timeout) => {
+                self.timeout_ms = timeout as u128;
+                self.generate() // make changes to disk
+            },
+            None => return self
+        }
+    }
+
+    pub fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Self {
+        match working_dir {
+            Some(dir) => {
+                self.working_dir = dir;
+                self.generate() // make changes to disk
+            },
+            None => return self
+        }
+    }
+    
     /// Create the ConfigBuilder struct instance and write on disk
     /// 
     /// Here, we dont write the instance of Config because the timeout_ms

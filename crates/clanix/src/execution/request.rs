@@ -10,39 +10,27 @@ use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 
 use crate::Policy;
-use crate::PolicyTrait;
 
 use super::ExecutionResult;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionRequest {
-    pub(super) program: OsString,
-    pub(super) args: Vec<OsString>,
-    pub(super) policy: Policy,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionRequestBuilder {
-    pub(super) program: OsString,
-    pub(super) args: Vec<OsString>,
-    pub(super) policy: Policy,
+pub struct ExecutionRequest {
+    pub(crate) program: OsString,
+    pub(crate) args: Vec<OsString>,
+    pub(crate) policy: Policy,
 }
 
 
 impl ExecutionRequest {
-    pub fn new<S: Into<OsString>>(program: S) -> ExecutionRequestBuilder {
-        // This just gives you request builder with the
-        // default message and you have to set the program/args
-        // to actually execute it
-        ExecutionRequestBuilder {
-            program: program.into(),
+    pub fn default() -> Self {
+        Self {
+            program: OsString::new(),
             args: Vec::new(),
             policy: Policy::defaults()
         }
-    }   
-}
-
-impl ExecutionRequestBuilder {
+    }
+    
     // It consumes the request after you call execute,
     // so you have to create a new request if you want
     // to call execute again
@@ -142,7 +130,7 @@ impl ExecutionRequestBuilder {
             status: exit_status.code(),
             stdout: captured_stdout,
             stderr: captured_stderr,
-            working_dir: self.policy.working_dir().clone()
+            working_dir: self.policy.working_dir().to_path_buf()
         })
     }
     

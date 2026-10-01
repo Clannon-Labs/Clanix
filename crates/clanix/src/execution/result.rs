@@ -1,26 +1,25 @@
 
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::borrow::Cow;
 
 use uuid::Uuid;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 use crate::Policy;
-use crate::PolicyTrait;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionResult {
-    pub(super) id: Uuid,
-    pub(super) success: bool,
-    pub(super) status: Option<i32>,
+    pub(crate) id: Uuid,
+    pub(crate) success: bool,
+    pub(crate) status: Option<i32>,
 
     #[serde(serialize_with = "bytes_to_str", deserialize_with = "str_to_bytes")]
-    pub(super) stdout: Vec<u8>,
+    pub(crate) stdout: Vec<u8>,
 
     #[serde(serialize_with = "bytes_to_str", deserialize_with = "str_to_bytes")]
-    pub(super) stderr: Vec<u8>,  
+    pub(crate) stderr: Vec<u8>,  
   
-    pub(super) working_dir: PathBuf,
+    pub(crate) working_dir: PathBuf,
 }
 
 fn bytes_to_str<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> 
@@ -61,7 +60,7 @@ impl ExecutionResult {
             status: None,
             stdout: vec![],
             stderr: vec![],
-            working_dir: Policy::default_working_dir()
+            working_dir: Policy::defaults().working_dir().to_path_buf()
         }
     }
 
@@ -69,7 +68,7 @@ impl ExecutionResult {
         &self.id
     }
 
-    pub fn working_dir(&self) -> &PathBuf {
+    pub fn working_dir(&self) -> &Path {
         &self.working_dir
     }
     

@@ -1,10 +1,9 @@
 
 use clanix::Config;
-use clanix::PolicyTrait;
+use clanix::ExecutionResult;
 
 use crate::NAME;
 use crate::ConfigCommands;
-use crate::ExecutionResult;
 
 pub fn handle_config(
     result: &mut ExecutionResult,

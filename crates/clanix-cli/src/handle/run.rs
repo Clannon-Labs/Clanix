@@ -1,11 +1,19 @@
 
 use clanix::ExecutionResult;
 use crate::NAME;
+use crate::error::Result;
 
-// Returns stdout and stderr strings
-pub fn handle_run(result: &mut ExecutionResult, program: String, args: Vec<String>, verbose: bool) {
+// This currently doesn't return any error because I am not checking
+// for potential errors with the program and args,
+// 
+// But the error types needed for it are already made in crate::error
+pub fn handle_run(
+    result: &mut ExecutionResult,
+    program: String,
+    args: Vec<String>,
+    verbose: bool) -> Result<()> {
     let args = args.join(" ");
-
+    
     let stdout_output = &result.stdout_string();
     let stderr_output = &result.stderr_string();
 
@@ -48,5 +56,7 @@ pub fn handle_run(result: &mut ExecutionResult, program: String, args: Vec<Strin
             result.set_stderr(final_output)
         }
     }
+
+    Ok(())
 
 }

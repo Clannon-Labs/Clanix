@@ -9,23 +9,22 @@
 //! by clanix, doesn't matter how client wants to use them to make the user facing cli
 //! or whatever the client does
 
-mod run;
-mod config;
-mod snapshot;
-mod write;
-mod test;
+mod handle;
+mod error;
+
+use handle::*;
+use crate::error::Error;
 
 use std::path::PathBuf;
-use clap::{Parser, Subcommand, ValueEnum};
+
+use clap::{
+    Parser,
+    Subcommand,
+    ValueEnum,
+};
 use serde::{Deserialize, Serialize};
 
-use clanix::{
-    // Config,
-    // PolicyTrait,
-    // ExecutionResult,
-    // ExecutionRequest,
-    ExecutionEnvironment
-};
+use clanix::Environment;
 
 const NAME: &str = "Clanix";
 
@@ -33,7 +32,7 @@ const NAME: &str = "Clanix";
 #[command(name = "clanix")]
 #[command(version)]
 #[command(
-about = "Clanix is a fast developer execution tool built by Clannon Labs - Cybro
+about = "{NAME} is a fast developer execution tool built by Clannon Labs - Cybro
 Visit https://github.com/Clannon-Labs/Clanix to read the documents"
 )]
 struct CliInput {
@@ -203,7 +202,8 @@ enum OutputFormat {
     Toml,
 }
 
-fn main() {
+
+fn main() -> Result<(), Error> {
     let CliInput {
         command,
         verbose,
@@ -214,35 +214,36 @@ fn main() {
         working_dir
     } = CliInput::parse();
 
-    let mut result = ExecutionEnvironment::result();
+    let mut result = Environment::result()?;
 
     match command {
         Commands::Run { program, args } => {
-            result = ExecutionEnvironment::request(&program)
-                .args(&args)
-                .set_disable_timeout(disable_timeout)
-                .set_timeout_ms(timeout)
-                .set_working_dir(working_dir)
-                .execute()
-                .unwrap();
+            result = Environment::request(&program)?
+                    .args(&args)
+                    .set_disable_timeout(disable_timeout)?
+                    .set_timeout_ms(timeout)?
+                    .set_working_dir(working_dir)?
+                    .execute()?;
 
-            run::handle_run(&mut result, program, args, verbose);
+            let _ = run::handle_run(&mut result, program, args, verbose);
         }
         Commands::Test => {
-            test::handle_test(&mut result, verbose);
+            let _ = test::handle_test(&mut result, verbose);
         }
         Commands::Write { content, path } => {
-            write::handle_write(&mut result, verbose, path, content);
+            let _ = write::handle_write(&mut result, verbose, path, content);
         },
         Commands::Config {configcommand} => {
-            config::handle_config(&mut result, configcommand, verbose);
+            let _ = config::handle_config(&mut result, configcommand, verbose);
         }
     }
 
     match snapshot {
         Some(path) => {
-            snapshot::handle_snapshot(&mut result, path, output_format);
+            let _ = snapshot::handle_snapshot(&mut result, path, output_format);
         }
         None => {}
     }
+
+    Ok(())
 }

@@ -1,15 +1,18 @@
 
-use clanix::Config;
 use clanix::ExecutionResult;
+
+use clanix::Environment;
 
 use crate::NAME;
 use crate::ConfigCommands;
+
+use crate::error::Result;
 
 pub fn handle_config(
     result: &mut ExecutionResult,
     configcommand: ConfigCommands,
     verbose: bool,
-) {
+) -> Result<()>{
     /*
         * The core could technically be able to set the config to default if
         * we called .set_default() at the end of the chain but it would be 
@@ -20,7 +23,7 @@ pub fn handle_config(
     // println!("{disable_timeout:?}, {timeout_ms:?}, {working_dir:?}");
     match configcommand {
         ConfigCommands::Default => {
-            let config = Config::set_default();
+            let config = Environment::set_default_config()?;
 
             // println!("{config:?}");
             if verbose {
@@ -37,9 +40,9 @@ pub fn handle_config(
             println!("Init is not developed yet!")
         },
         ConfigCommands::Set {disable_timeout, timeout_ms, working_dir} => {
-            let config = Config::new()
-                .set_disable_timeout(disable_timeout)
-                .set_timeout_ms(timeout_ms)
+            let config = Environment::new_config()?
+                .set_disable_timeout(disable_timeout)?
+                .set_timeout_ms(timeout_ms)?
                 .set_working_dir(working_dir);
             
             if verbose {
@@ -53,7 +56,8 @@ pub fn handle_config(
             }
         },
         ConfigCommands::What{disable_timeout, timeout_ms, working_dir} => {
-            let config = Config::read();
+            let config = Environment::read_config()?;
+            
             if disable_timeout {
                 println!("{}", config.disable_timeout())
             } else if timeout_ms {
@@ -69,4 +73,5 @@ pub fn handle_config(
     result.set_success(true);
     result.set_status(Some(101));
     result.set_stderr("".to_string());
+    Ok(())
 }

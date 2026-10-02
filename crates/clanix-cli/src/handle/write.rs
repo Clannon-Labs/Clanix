@@ -5,8 +5,14 @@ use std::path::PathBuf;
 use clanix::ExecutionResult;
 
 use crate::NAME;
+use crate::error::Result;
 
-pub fn handle_write(result: &mut ExecutionResult, verbose: bool, path: PathBuf, content: String) {
+pub fn handle_write(
+    result: &mut ExecutionResult, 
+    verbose: bool, 
+    path: PathBuf, 
+    content: String
+) -> Result<()> {
     let final_path = result.working_dir().join(path);
     fs::write(&final_path, &content).unwrap(); // Replace later
 
@@ -25,4 +31,6 @@ pub fn handle_write(result: &mut ExecutionResult, verbose: bool, path: PathBuf, 
     result.set_success(true);
     result.set_status(Some(101));
     result.set_stderr("".to_string());
+
+    Ok(())
 }

@@ -3,7 +3,9 @@ use clanix::ExecutionResult;
 
 use crate::NAME;
 
-pub fn handle_test(result: &mut ExecutionResult, verbose: bool) {
+use crate::error::Result;
+
+pub fn handle_test(result: &mut ExecutionResult, verbose: bool) -> Result<()> {
     if verbose {
         let message = format!("{NAME} [SIMULATED]: Request to run tests was successful\n");
         println!("{message}");
@@ -17,4 +19,6 @@ pub fn handle_test(result: &mut ExecutionResult, verbose: bool) {
     result.set_success(true);
     result.set_status(Some(101));
     result.set_stderr("".to_string());
+
+    Ok(())
 }

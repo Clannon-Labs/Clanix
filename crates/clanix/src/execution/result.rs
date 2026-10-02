@@ -6,6 +6,7 @@ use uuid::Uuid;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 use crate::Policy;
+use crate::ResultError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionResult {
@@ -47,21 +48,24 @@ impl ExecutionResult {
     // translate whatever was changed internally into what the
     // callers expect; with no breaking changes
 
-    pub fn defaults() -> Self {
+    pub fn defaults() -> Result<Self, ResultError> {
         /*
             * If user/client gave working dir, then use it for this run,
             * if not, read the working dir set in config and put that as default 
             * for this run
             */
-    
-        Self {
+        
+        Ok(Self {
             id: Uuid::new_v4(),
             success: false,
             status: None,
             stdout: vec![],
             stderr: vec![],
-            working_dir: Policy::defaults().working_dir().to_path_buf()
-        }
+            working_dir: Policy::defaults()
+                .map_err(|_| ResultError::InvalidWorkingDir)?
+                .working_dir()
+                .to_path_buf()
+        })
     }
 
     pub fn id(&self) -> &Uuid {

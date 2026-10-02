@@ -5,6 +5,7 @@ use std::path::{PathBuf, Path};
 use serde::{Serialize, Deserialize};
 
 use crate::config::Config;
+use crate::PolicyError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
@@ -19,16 +20,16 @@ pub struct Policy {
  * in disk, you MUST call the Config methods, not Policy ones
  */
 impl Policy {
-    pub fn defaults() -> Self {
-        Self {
+    pub fn defaults() -> Result<Self, PolicyError> {
+        Ok(Self {
             disable_timeout: Config::default_disable_timeout(),
             timeout_ms: Config::default_timeout_ms(),
-            working_dir: Config::default_working_dir(),
-        }
+            working_dir: Config::default_working_dir()?,
+        })
     }
 
     // Just an alias for defaults()
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, PolicyError> {
         Self::defaults()
     }
 
@@ -45,7 +46,7 @@ impl Policy {
         &self.working_dir
     }
     
-    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Result<Self, PolicyError> {
         /*
          * If user gives the timeout_ms, which makes timeout_ms: Some(),
          * set the timeout_ms for now to that.
@@ -55,16 +56,16 @@ impl Policy {
         match timeout_ms {
             Some(millis) => {
                 self.timeout_ms = Duration::from_millis(millis);
-                return self
+                return Ok(self)
             },
             None => {
-                self.timeout_ms = Config::read().timeout_ms();
-                return self
+                self.timeout_ms = Config::read()?.timeout_ms();
+                return Ok(self)
             }
         }
     }
 
-    pub fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Self {
+    pub fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Result<Self, PolicyError> {
         /*
          * If user gives the working_dir, which makes working_dir: Some(),
          * set the working_dir for now to that.
@@ -74,16 +75,16 @@ impl Policy {
         match working_dir {
             Some(dir) => {
                 self.working_dir = dir;
-                return self
+                return Ok(self)
             },
             None => {
-                self.working_dir = Config::read().working_dir().clone();
-                return self
+                self.working_dir = Config::read()?.working_dir().clone();
+                return Ok(self)
             }
         }
     }
 
-    pub fn set_disable_timeout(mut self, disable: bool) -> Self {
+    pub fn set_disable_timeout(mut self, disable: bool) -> Result<Self, PolicyError> {
         /*
          * If user gives the disable_timeout, which makes disable: true,
          * set the disable_timeout for now to that.
@@ -91,12 +92,12 @@ impl Policy {
          * disable_timeout to that
          */
         if !disable {
-            self.disable_timeout = Config::read().disable_timeout();
-            return self
+            self.disable_timeout = Config::read()?.disable_timeout();
+            return Ok(self)
         }
         
         self.disable_timeout = disable;
-        return self
+        return Ok(self)
     }
 }
 

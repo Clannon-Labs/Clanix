@@ -12,7 +12,8 @@ use serde::{Serialize, Deserialize};
 use crate::Policy;
 
 use super::ExecutionResult;
-
+use crate::RequestError;
+use crate::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
@@ -23,18 +24,18 @@ pub struct ExecutionRequest {
 
 
 impl ExecutionRequest {
-    pub fn default() -> Self {
-        Self {
+    pub fn default() -> Result<Self, Error> {
+        Ok(Self {
             program: OsString::new(),
             args: Vec::new(),
-            policy: Policy::defaults()
-        }
+            policy: Policy::defaults()?
+        })
     }
     
     // It consumes the request after you call execute,
     // so you have to create a new request if you want
     // to call execute again
-    pub fn execute(self) -> Result<ExecutionResult, String> {
+    pub fn execute(self) -> Result<ExecutionResult, Error> {
         /*
             * Change all the panic creating .expect()s with proper
             * error handling later
@@ -54,7 +55,7 @@ impl ExecutionRequest {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Couldn't spawn a child process");
+            .map_err(|_| RequestError::SpawnError)?;
 
         // println!("Just ran the command");
         
@@ -63,8 +64,11 @@ impl ExecutionRequest {
 
         // println!("Just set the start time and id");
 
-        let mut stdout_stream = child.stdout.take().expect("Couldn't get the stdout stream!");
-        let mut stderr_stream = child.stderr.take().expect("Couldn't get the stderr stream!");
+        let mut stdout_stream = child.stdout.take()
+            .ok_or_else(|| RequestError::StdoutError)?;
+        
+        let mut stderr_stream = child.stderr.take()
+            .ok_or_else(|| RequestError::StderrError)?;
 
         // println!("Just took stdout and stderr streams");
         
@@ -118,7 +122,8 @@ impl ExecutionRequest {
             }
         }
 
-        let exit_status = child.wait().expect("Couldn't get exit status from the process");
+        let exit_status = child.wait()
+            .map_err(|_| RequestError::StatusError)?;
 
         // Read the stderr if there is any
         let mut captured_stderr: Vec<u8> = Vec::new();
@@ -150,23 +155,32 @@ impl ExecutionRequest {
             }
             self
         }
-    
+
+    /*
+     * These functions return Error(which gets converted from PolicyError internally) 
+     * instead of RequestError because these are used to change the policy state and
+     * not to actually request the execution.
+     * 
+     * Also as you are seeing, the method used to actually request execution (execute())
+     * returns RequestError wrapped in the Error
+     */
+        
     // This is used to get the policy so you can later set
     // the individual policy key
     // These functions are for setting the individual
     // policy keys
-    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
-        self.policy = Policy::set_timeout_ms(self.policy, timeout_ms);
-        self
+    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Result<Self, Error> {
+        self.policy = Policy::set_timeout_ms(self.policy, timeout_ms)?;        
+        Ok(self)
     }
 
-    pub fn set_disable_timeout(mut self, disable: bool) -> Self {
-        self.policy = Policy::set_disable_timeout(self.policy, disable);
-        self
+    pub fn set_disable_timeout(mut self, disable: bool) -> Result<Self, Error> {
+        self.policy = Policy::set_disable_timeout(self.policy, disable)?;
+        Ok(self)
     }
     
-    pub fn set_working_dir(mut self, directory: Option<PathBuf>) -> Self {
-        self.policy = Policy::set_working_dir(self.policy, directory);
-        self
+    pub fn set_working_dir(mut self, directory: Option<PathBuf>) -> Result<Self, Error> {
+        self.policy = Policy::set_working_dir(self.policy, directory)?;
+        Ok(self)
     }
 }

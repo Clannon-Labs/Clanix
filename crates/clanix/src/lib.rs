@@ -18,15 +18,17 @@
 //! actually use the data to do some operation
 
 mod config;
-// mod shared;
+mod error;
 mod execution;
 mod policy;
 mod environment;
-
+// mod stages;
 
 // Custom crates
 pub use policy::*;
 pub use config::*;
 pub use execution::*;
-
 pub use environment::*;
+
+pub use error::*;
+// pub use stages::*;

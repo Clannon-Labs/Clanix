@@ -59,7 +59,7 @@ pub fn handle_config(
             let config = Environment::read_config()?;
             
             if disable_timeout {
-                println!("{}", config.disable_timeout())
+                println!("{:?}", config.disable_timeout())
             } else if timeout_ms {
                 println!("{:?}", config.timeout_ms())
             } else if working_dir {

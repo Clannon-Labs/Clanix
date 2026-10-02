@@ -14,9 +14,11 @@ use std::time::Duration;
 
 use serde::{Serialize, Deserialize};
 use serde_json;
+use toml;
 
 use crate::ConfigError;
 
+#[allow(unused)]
 const NAME_JSON: &str = "clanix.json";
 
 #[allow(unused)]
@@ -146,7 +148,7 @@ impl ConfigBuilder {
     /// but we dont want to store Duration struct instance on disk,
     /// we want a clean timeout_ms: u128.
     pub fn generate(self) -> Result<Self, ConfigError> {
-        let config = serde_json::to_string_pretty(
+        let config = toml::to_string_pretty(
             &ConfigBuilder {
                 disable_timeout: self.disable_timeout,
                 timeout_ms: self.timeout_ms,
@@ -155,7 +157,7 @@ impl ConfigBuilder {
         )
         .map_err(|_| ConfigError::Prepare)?;
 
-        fs::write(&NAME_JSON, config)
+        fs::write(&NAME_TOML, config)
             .map_err(|_| ConfigError::Write)?;
         
         Ok(self)
@@ -166,18 +168,17 @@ impl ConfigBuilder {
     /// 
     /// This doesn't create or change the config on disk
     pub fn read() -> Result<Self, ConfigError> {
-        if !PathBuf::from(NAME_JSON).exists() {
-            println!("{NAME_JSON} doesn't exist..\nDefaulting to fallback values..");
-            return Ok(Self::defaults()?)
-        }
-        
-        let file = fs::File::open(NAME_JSON)
-            .map_err(|_| ConfigError::Open)?;
-        
-        let reader = BufReader::new(file);
-        let config = serde_json::from_reader(reader)
-            .map_err(|_| ConfigError::Parse)?;
-        
+        let config = if PathBuf::from(NAME_TOML).exists() {
+            let file = fs::File::open(NAME_TOML)
+                .map_err(|_| ConfigError::Open)?;
+            
+            let reader = BufReader::new(file);
+            serde_json::from_reader(reader)
+                .map_err(|_| ConfigError::Parse)? 
+            
+        } else {
+            Self::defaults()?.generate()?
+        };
         Ok(config)
     }
 }

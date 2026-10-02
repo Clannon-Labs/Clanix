@@ -18,21 +18,21 @@ pub fn handle_snapshot(
         // each command already wrote their verbose output
         OutputFormat::Text => {
             let final_path = result.working_dir().join(path);
-            fs::write(&final_path, &result.stdout()).unwrap();
+            fs::write(&final_path, &result.stdout())?;
             println!("Wrote stdout to {final_path:?}");
             Ok(())
         },
         OutputFormat::Json => {
             let final_path = result.working_dir().join(path);
-            let output = serde_json::to_string_pretty(&result).unwrap();
+            let output = serde_json::to_string_pretty(&result)?;
             fs::write(&final_path, &output).unwrap();
             println!("Wrote stdout to {final_path:?}");
             Ok(())
         }
         OutputFormat::Toml => {
             let final_path = result.working_dir().join(path);
-            let output = toml::to_string_pretty(&result).unwrap();
-            fs::write(&final_path, &output).unwrap();
+            let output = toml::to_string_pretty(&result)?;
+            fs::write(&final_path, &output)?;
             println!("Wrote stdout to {final_path:?}");
             Ok(())
         }

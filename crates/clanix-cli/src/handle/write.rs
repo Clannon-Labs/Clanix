@@ -14,7 +14,7 @@ pub fn handle_write(
     content: String
 ) -> Result<()> {
     let final_path = result.working_dir().join(path);
-    fs::write(&final_path, &content).unwrap(); // Replace later
+    fs::write(&final_path, &content)?; 
 
     if verbose {
         let message = format!(

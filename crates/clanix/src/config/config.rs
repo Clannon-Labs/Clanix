@@ -58,6 +58,10 @@ impl Config {
         ConfigBuilder::read()
     }
 
+    pub fn set_default() -> Result<ConfigBuilder, ConfigError> {
+        ConfigBuilder::defaults()?.generate()
+    }
+    
     /// Default timeout_ms of 1ms is just for experimentation
     /// and will be changed in future so it's more realistic
     pub fn default_timeout_ms() -> Duration {

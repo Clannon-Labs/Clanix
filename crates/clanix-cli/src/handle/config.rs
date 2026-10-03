@@ -1,7 +1,8 @@
 
-use clanix::ExecutionResult;
-
-use clanix::Environment;
+use clanix::{
+    Config,
+    ExecutionResult,
+};
 
 use crate::NAME;
 use crate::ConfigCommands;
@@ -23,7 +24,7 @@ pub fn handle_config(
     // println!("{disable_timeout:?}, {timeout_ms:?}, {working_dir:?}");
     match configcommand {
         ConfigCommands::Default => {
-            let config = Environment::set_default_config()?;
+            let config = Config::set_default()?;
 
             // println!("{config:?}");
             if verbose {
@@ -40,7 +41,7 @@ pub fn handle_config(
             println!("Init is not developed yet!")
         },
         ConfigCommands::Set {disable_timeout, timeout_ms, working_dir} => {
-            let config = Environment::new_config()?
+            let config = Config::read()?
                 .set_disable_timeout(disable_timeout)?
                 .set_timeout_ms(timeout_ms)?
                 .set_working_dir(working_dir);
@@ -56,7 +57,7 @@ pub fn handle_config(
             }
         },
         ConfigCommands::What{disable_timeout, timeout_ms, working_dir} => {
-            let config = Environment::read_config()?;
+            let config = Config::read()?;
             
             if disable_timeout {
                 println!("{:?}", config.disable_timeout())

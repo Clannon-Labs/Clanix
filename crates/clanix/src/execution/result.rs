@@ -39,15 +39,31 @@ fn str_to_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
         Ok(string.into_bytes())
     }
 
-
+/// The format users see the output in the terminal
 impl std::fmt::Display for ExecutionResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "id: {}", self.id)?;
-        writeln!(f, "success: {}", self.success)?;
-        writeln!(f, "status: {:?}", self.status)?;
-        writeln!(f, "working_dir: {}", self.working_dir.display())?;
-        writeln!(f, "stdout: \n{:?}", self.stdout_string())?;
-        write!(f, "stderr: \n{:?}", self.stderr_string())
+        writeln!(f, "\nExecution Result")?;
+        writeln!(f, "----------------")?;
+        writeln!(f, "ID: {}", self.id)?;
+        writeln!(f, "Success: {}", self.success)?;
+
+        if let Some(status) = self.status {
+            writeln!(f, "Status: {:?}", status)?;
+        }
+        
+        writeln!(f, "\nWorking_dir: {}", self.working_dir.display())?;
+
+        if !self.stdout.is_empty() {
+            writeln!(f, "\nStdout: ")?;
+            writeln!(f, "{}", self.stdout_string())?;
+        }
+
+        if !self.stderr.is_empty() {
+            writeln!(f, "\nStderr: ")?;
+            writeln!(f, "{}", self.stderr_string())?;
+        }
+
+        Ok(())
     }
 }
     

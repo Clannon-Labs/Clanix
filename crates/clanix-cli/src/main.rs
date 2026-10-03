@@ -214,7 +214,7 @@ fn main() -> Result<(), Error> {
         working_dir
     } = CliInput::parse();
 
-    let mut result = Environment::result()?;
+    let mut result = Environment::new_result()?;
 
     match command {
         Commands::Run { program, args } => {

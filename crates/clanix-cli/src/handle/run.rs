@@ -33,11 +33,11 @@ pub fn handle_run(
         if verbose {
             let message = format!("{NAME}: Command {program} {args} was ran successfully!\n{final_output}\n");
             println!("{message}");
-            result.set_stdout(message);
+            let _ = result.set_stdout(message)?;
         } else {
             let message = format!("{NAME}: {program} {args} was successful!\n{final_output}\n");
             println!("{message}");
-            result.set_stdout(message)
+            let _ = result.set_stdout(message)?;
         }
     } else {
         let output = if !stderr_output.trim().is_empty() {
@@ -50,11 +50,11 @@ pub fn handle_run(
         if verbose {
             let message = format!("{NAME}: Command {program} {args} failed!\n{output}\n");
             eprintln!("{message}");
-            result.set_stderr(final_output)
+            let _ = result.set_stderr(final_output)?;
         } else {
             let message = format!("{NAME}: {program} {args} failed!\n{output}\n");
             eprintln!("{message}");
-            result.set_stderr(final_output)
+            let _ = result.set_stderr(final_output)?;
         }
     }
 

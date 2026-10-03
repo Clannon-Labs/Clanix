@@ -7,6 +7,7 @@ use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 use crate::Policy;
 use crate::ResultError;
+use crate::error::Result as DefResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionResult {
@@ -100,20 +101,24 @@ impl ExecutionResult {
         String::from_utf8_lossy(&self.stderr)
     }
 
-    pub fn set_success(&mut self, new_success: bool) {
-        self.success = new_success
+    pub fn set_success(&mut self, new_success: bool) -> DefResult<&mut Self> {
+        self.success = new_success;
+        Ok(self)
     }
 
-    pub fn set_status(&mut self, new_status: Option<i32>) {
-        self.status = new_status
+    pub fn set_status(&mut self, new_status: Option<i32>) -> DefResult<&mut Self> {
+        self.status = new_status;
+        Ok(self)
     }
     
-    pub fn set_stdout(&mut self, new_stdout: String) {
-        self.stdout = new_stdout.into_bytes()
+    pub fn set_stdout(&mut self, new_stdout: String) -> DefResult<&mut Self> {
+        self.stdout = new_stdout.into_bytes();
+        Ok(self)
     }
 
-    pub fn set_stderr(&mut self, new_stderr: String) {
-        self.stderr = new_stderr.into_bytes()
+    pub fn set_stderr(&mut self, new_stderr: String) -> DefResult<&mut Self> {
+        self.stderr = new_stderr.into_bytes();
+        Ok(self)
     }
 }
 

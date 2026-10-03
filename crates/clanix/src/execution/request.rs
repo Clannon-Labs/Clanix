@@ -13,7 +13,7 @@ use crate::Policy;
 
 use super::ExecutionResult;
 use crate::RequestError;
-use crate::Error;
+use crate::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
@@ -24,7 +24,7 @@ pub struct ExecutionRequest {
 
 
 impl ExecutionRequest {
-    pub fn default() -> Result<Self, Error> {
+    pub fn default() -> Result<Self> {
         Ok(Self {
             program: OsString::new(),
             args: Vec::new(),
@@ -35,7 +35,7 @@ impl ExecutionRequest {
     // It consumes the request after you call execute,
     // so you have to create a new request if you want
     // to call execute again
-    pub fn execute(self) -> Result<ExecutionResult, Error> {
+    pub fn execute(self) -> Result<ExecutionResult> {
         /*
             * Change all the panic creating .expect()s with proper
             * error handling later
@@ -169,17 +169,17 @@ impl ExecutionRequest {
     // the individual policy key
     // These functions are for setting the individual
     // policy keys
-    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Result<Self, Error> {
+    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Result<Self> {
         self.policy = Policy::set_timeout_ms(self.policy, timeout_ms)?;        
         Ok(self)
     }
 
-    pub fn set_disable_timeout(mut self, disable: bool) -> Result<Self, Error> {
+    pub fn set_disable_timeout(mut self, disable: bool) -> Result<Self> {
         self.policy = Policy::set_disable_timeout(self.policy, disable)?;
         Ok(self)
     }
     
-    pub fn set_working_dir(mut self, directory: Option<PathBuf>) -> Result<Self, Error> {
+    pub fn set_working_dir(mut self, directory: Option<PathBuf>) -> Result<Self> {
         self.policy = Policy::set_working_dir(self.policy, directory)?;
         Ok(self)
     }

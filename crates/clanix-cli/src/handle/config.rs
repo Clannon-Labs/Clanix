@@ -30,11 +30,11 @@ pub fn handle_config(
             if verbose {
                 let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
                 println!("{message}");
-                result.set_stdout(message);
+                let _ = result.set_stdout(message)?;
             } else {
                 let message = format!("{NAME}: Successfully set the config.\n");
                 println!("{message}");
-                result.set_stdout(message);
+                let _ = result.set_stdout(message)?;
             }
         },
         ConfigCommands::Init => {
@@ -49,11 +49,11 @@ pub fn handle_config(
             if verbose {
                 let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
                 println!("{message}");
-                result.set_stdout(message);
+                let _ = result.set_stdout(message)?;
             } else {
                 let message = format!("{NAME}: Successfully set the config.\n");
                 println!("{message}");
-                result.set_stdout(message);
+                let _ = result.set_stdout(message)?;
             }
         },
         ConfigCommands::What{disable_timeout, timeout_ms, working_dir} => {
@@ -71,8 +71,8 @@ pub fn handle_config(
         }
     }
 
-    result.set_success(true);
-    result.set_status(Some(101));
-    result.set_stderr("".to_string());
+    let _ = result.set_success(true)?;
+    let _ = result.set_status(Some(101))?;
+    let _ = result.set_stderr("".to_string())?;
     Ok(())
 }

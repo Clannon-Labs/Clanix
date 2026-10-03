@@ -214,18 +214,32 @@ fn main() -> Result<(), Error> {
         working_dir
     } = CliInput::parse();
 
-    let mut result = Environment::new_result()?;
+    // Create a new environment for execution
+    let mut environment = Environment::new()?;
+    
+    // Get the result type
+    let mut result = environment.new_result()?;
 
     match command {
         Commands::Run { program, args } => {
-            result = Environment::request(&program)?
+            // Run in that environment with these arguments
+            let request = environment.new_request(&program)?
                     .args(&args)
                     .set_disable_timeout(disable_timeout)?
                     .set_timeout_ms(timeout)?
-                    .set_working_dir(working_dir)?
-                    .execute()?;
+                    .set_working_dir(working_dir)?;
 
+            // IMPORTANT: Execute the request in that environment because
+            // running the request outside of the environment will make the
+            // request and error drift apart from the rest of the environment..
+            // 
+            environment = environment.execute_request(request)?;
+            
+            // Get the result form the environment and replace the old default result
+            result = environment.result()?;
+            
             let _ = run::handle_run(&mut result, program, args, verbose);
+            // println!("Environment what{:?}", environment.what()?)
         }
         Commands::Test => {
             let _ = test::handle_test(&mut result, verbose);

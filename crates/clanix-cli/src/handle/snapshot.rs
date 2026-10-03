@@ -26,7 +26,7 @@ pub fn handle_snapshot(
         },
         OutputFormat::Json => {
             let final_path = result.working_dir().join(path);
-            let output = serde_json::to_string_pretty(&result)?;
+            let output = result.to_json()?;
             
             fs::write(&final_path, &output)?;
             println!("Wrote stdout to {final_path:?}");
@@ -35,7 +35,7 @@ pub fn handle_snapshot(
         }
         OutputFormat::Toml => {
             let final_path = result.working_dir().join(path);
-            let output = toml::to_string_pretty(&result)?;
+            let output = result.to_toml()?;
             
             fs::write(&final_path, &output)?;
             println!("Wrote stdout to {final_path:?}");

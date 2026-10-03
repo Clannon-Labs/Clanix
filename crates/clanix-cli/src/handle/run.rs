@@ -14,6 +14,8 @@ pub fn handle_run(
     args: Vec<String>,
     verbose: bool) -> Result<()> {
     let args = args.join(" ");
+
+    println!("Result: {}", result);
     
     let stdout_output = &result.stdout_string();
     let stderr_output = &result.stderr_string();

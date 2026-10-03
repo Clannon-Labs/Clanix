@@ -8,12 +8,12 @@
 
 use std::fs;
 use std::env;
-use std::io::BufReader;
+// use std::io::BufReader;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Serialize, Deserialize};
-use serde_json;
+// use serde_json;
 use toml;
 
 use crate::ConfigError;
@@ -169,11 +169,12 @@ impl ConfigBuilder {
     /// This doesn't create or change the config on disk
     pub fn read() -> Result<Self, ConfigError> {
         let config = if PathBuf::from(NAME_TOML).exists() {
-            let file = fs::File::open(NAME_TOML)
-                .map_err(|_| ConfigError::Open)?;
+            // let file = fs::File::open(NAME_TOML)
+            //     .map_err(ConfigError::Open)?;
             
-            let reader = BufReader::new(file);
-            serde_json::from_reader(reader)
+            let content = fs::read_to_string(NAME_TOML)
+                .map_err(ConfigError::Read)?;
+            toml::from_str(&content)
                 .map_err(|_| ConfigError::Parse)? 
             
         } else {

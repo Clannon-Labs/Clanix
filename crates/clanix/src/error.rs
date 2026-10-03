@@ -90,11 +90,8 @@ pub enum ConfigError {
     #[error("Couldn't get the default working directory for the current environment")]
     WorkingDir,
     
-    #[error("Couldn't open the config file")]
-    Open,
-    
     #[error("Couldn't read value from config!")]
-    Read,
+    Read(#[from] std::io::Error),
 
     #[error("Couldn't write value to config!")]
     Write,

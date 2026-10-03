@@ -15,7 +15,7 @@ use super::ExecutionResult;
 use crate::RequestError;
 use crate::Result;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
     pub(crate) program: OsString,
     pub(crate) args: Vec<OsString>,
@@ -28,19 +28,19 @@ impl ExecutionRequest {
         Ok(Self {
             program: OsString::new(),
             args: Vec::new(),
-            policy: Policy::defaults()?
+            policy: Policy::default()?,
         })
     }
-    
+
     // It consumes the request after you call execute,
     // so you have to create a new request if you want
     // to call execute again
-    pub fn execute(self) -> Result<ExecutionResult> {
+    pub(crate) fn execute(&self) -> Result<ExecutionResult> {
         /*
             * Change all the panic creating .expect()s with proper
             * error handling later
             */
-
+        
         let working_dir = &self.policy.working_dir();
         let timeout_ms = self.policy.timeout_ms();
         let disable_timeout = self.policy.disable_timeout();

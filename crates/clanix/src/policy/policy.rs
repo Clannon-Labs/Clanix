@@ -7,12 +7,14 @@ use serde::{Serialize, Deserialize};
 use crate::config::Config;
 use crate::PolicyError;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Policy {
     pub(crate) disable_timeout: bool,
     pub(crate) timeout_ms: Duration,
     pub(crate) working_dir: PathBuf,
 }
+
+type Result<T> = std::result::Result<T, PolicyError>;
 
 /*
  * Calling any method on policy changes data only in memory
@@ -20,7 +22,7 @@ pub struct Policy {
  * in disk, you MUST call the Config methods, not Policy ones
  */
 impl Policy {
-    pub fn defaults() -> Result<Self, PolicyError> {
+    pub fn default() -> Result<Self> {
         Ok(Self {
             disable_timeout: Config::default_disable_timeout(),
             timeout_ms: Config::default_timeout_ms(),
@@ -29,8 +31,8 @@ impl Policy {
     }
 
     // Just an alias for defaults()
-    pub fn new() -> Result<Self, PolicyError> {
-        Self::defaults()
+    pub fn new() -> Result<Self> {
+        Self::default()
     }
 
 
@@ -46,7 +48,7 @@ impl Policy {
         &self.working_dir
     }
     
-    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Result<Self, PolicyError> {
+    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Result<Self> {
         /*
          * If user gives the timeout_ms, which makes timeout_ms: Some(),
          * set the timeout_ms for now to that.
@@ -65,7 +67,7 @@ impl Policy {
         }
     }
 
-    pub fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Result<Self, PolicyError> {
+    pub fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Result<Self> {
         /*
          * If user gives the working_dir, which makes working_dir: Some(),
          * set the working_dir for now to that.
@@ -84,7 +86,7 @@ impl Policy {
         }
     }
 
-    pub fn set_disable_timeout(mut self, disable: bool) -> Result<Self, PolicyError> {
+    pub fn set_disable_timeout(mut self, disable: bool) -> Result<Self> {
         /*
          * If user gives the disable_timeout, which makes disable: true,
          * set the disable_timeout for now to that.

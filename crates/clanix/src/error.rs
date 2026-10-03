@@ -28,6 +28,9 @@ pub enum Error {
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum RequestError {
+    #[error("Given request is not confirmed for execution. Call .confirm() to confirm it!")]
+    ConfirmError,
+    
     #[error("Couldnot spawn a child process")]
     SpawnError,
 
@@ -50,6 +53,15 @@ pub enum RequestError {
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum ResultError {
+    #[error("Given result is empty")]
+    Empty,
+
+    #[error("Couldn't convert to json")]
+    JsonError(#[from] serde_json::Error),
+
+    #[error("Couldn't convert to toml")]
+    TomlError(#[from] toml::ser::Error),
+    
     #[error("Invalid id found in the result")]
     InvalidId,
 
@@ -99,9 +111,9 @@ pub enum ConfigError {
     Write,
 
     #[error("Couldn't prepare config value!")]
-    Prepare,
+    Prepare(#[from] toml::ser::Error),
 
     #[error("Couldn't parse config value!")]
-    Parse,
+    Parse(#[from] toml::de::Error),
 }
 

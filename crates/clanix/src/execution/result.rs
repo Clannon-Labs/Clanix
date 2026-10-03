@@ -5,11 +5,11 @@ use std::borrow::Cow;
 use uuid::Uuid;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
-use crate::Policy;
-use crate::ResultError;
-use crate::error::Result as DefResult;
+// use crate::Policy;
+use crate::{Error, ResultError};
+use crate::error::Result as ExecResult;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ExecutionResult {
     pub(crate) id: Uuid,
     pub(crate) success: bool,
@@ -40,6 +40,17 @@ fn str_to_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
     }
 
 
+impl std::fmt::Display for ExecutionResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "id: {}", self.id)?;
+        writeln!(f, "success: {}", self.success)?;
+        writeln!(f, "status: {:?}", self.status)?;
+        writeln!(f, "working_dir: {}", self.working_dir.display())?;
+        writeln!(f, "stdout: \n{:?}", self.stdout_string())?;
+        write!(f, "stderr: \n{:?}", self.stderr_string())
+    }
+}
+    
 impl ExecutionResult {
     // These simple methods exist for the caller to call,
     // because the internal structure might change and
@@ -49,26 +60,41 @@ impl ExecutionResult {
     // translate whatever was changed internally into what the
     // callers expect; with no breaking changes
 
-    pub fn defaults() -> Result<Self, ResultError> {
-        /*
-            * If user/client gave working dir, then use it for this run,
-            * if not, read the working dir set in config and put that as default 
-            * for this run
-            */
-        
-        Ok(Self {
-            id: Uuid::new_v4(),
-            success: false,
-            status: None,
-            stdout: vec![],
-            stderr: vec![],
-            working_dir: Policy::defaults()
-                .map_err(|_| ResultError::InvalidWorkingDir)?
-                .working_dir()
-                .to_path_buf()
-        })
+    // We dont need this default because the Default trait automatically
+    // produces default values (eg: None for Option<>, 0 for i32 etc),
+    // and we eliminate the need to introduce the overhead of loading data
+    // onto the instance when it's just a default that's gonna be replaced
+    // anyway
+    // pub fn default() -> Result<Self, ResultError> {
+    //     /*
+    //         * If user/client gave working dir, then use it for this run,
+    //         * if not, read the working dir set in config and put that as default 
+    //         * for this run
+    //         */
+    //     
+    //     Ok(Self {
+    //         id: Uuid::new_v4(),
+    //         success: false,
+    //         status: None,
+    //         stdout: vec![],
+    //         stderr: vec![],
+    //         working_dir: Policy::default()
+    //             .map_err(|_| ResultError::InvalidWorkingDir)?
+    //             .working_dir()
+    //             .to_path_buf()
+    //     })
+    // }
+
+    pub fn to_json(&self) -> ExecResult<String> {
+        serde_json::to_string_pretty(&self)
+            .map_err(|e| Error::Result(ResultError::JsonError(e)))
     }
 
+    pub fn to_toml(&self) -> ExecResult<String> {
+        toml::to_string_pretty(&self)
+            .map_err(|e| Error::Result(ResultError::TomlError(e)))
+    }
+    
     pub fn id(&self) -> &Uuid {
         &self.id
     }
@@ -101,22 +127,22 @@ impl ExecutionResult {
         String::from_utf8_lossy(&self.stderr)
     }
 
-    pub fn set_success(&mut self, new_success: bool) -> DefResult<&mut Self> {
+    pub fn set_success(&mut self, new_success: bool) -> ExecResult<&mut Self> {
         self.success = new_success;
         Ok(self)
     }
 
-    pub fn set_status(&mut self, new_status: Option<i32>) -> DefResult<&mut Self> {
+    pub fn set_status(&mut self, new_status: Option<i32>) -> ExecResult<&mut Self> {
         self.status = new_status;
         Ok(self)
     }
     
-    pub fn set_stdout(&mut self, new_stdout: String) -> DefResult<&mut Self> {
+    pub fn set_stdout(&mut self, new_stdout: String) -> ExecResult<&mut Self> {
         self.stdout = new_stdout.into_bytes();
         Ok(self)
     }
 
-    pub fn set_stderr(&mut self, new_stderr: String) -> DefResult<&mut Self> {
+    pub fn set_stderr(&mut self, new_stderr: String) -> ExecResult<&mut Self> {
         self.stderr = new_stderr.into_bytes();
         Ok(self)
     }

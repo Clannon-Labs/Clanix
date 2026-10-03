@@ -18,6 +18,8 @@ use toml;
 
 use crate::ConfigError;
 
+type Result<T> = std::result::Result<T, ConfigError>;
+
 #[allow(unused)]
 const NAME_JSON: &str = "clanix.json";
 
@@ -43,23 +45,23 @@ pub struct ConfigBuilder {
 
 impl Config {
      /* Incase of Config, new() gives the new instance of what already exists on disk,
-     * you can call defaults() on ConfigBuilder if you explicitly want the instance with
+     * you can call default() on ConfigBuilder if you explicitly want the instance with
      * defaults
      * 
      * Also there are 2 identical methods where both do `ConfigBuilder::read()`
      * These are here just for the sake of clarity and I might remove it in future 
      */
      
-    pub fn new() -> Result<ConfigBuilder, ConfigError> {
+    pub fn new() -> Result<ConfigBuilder> {
         ConfigBuilder::read()
     }
 
-    pub fn read() -> Result<ConfigBuilder, ConfigError> {
+    pub fn read() -> Result<ConfigBuilder> {
         ConfigBuilder::read()
     }
 
-    pub fn set_default() -> Result<ConfigBuilder, ConfigError> {
-        ConfigBuilder::defaults()?.generate()
+    pub fn set_default() -> Result<ConfigBuilder> {
+        ConfigBuilder::default()?.generate()
     }
     
     /// Default timeout_ms of 1ms is just for experimentation
@@ -68,7 +70,7 @@ impl Config {
         Duration::from_millis(1)
     }
     
-    pub fn default_working_dir() -> Result<PathBuf, ConfigError> {
+    pub fn default_working_dir() -> Result<PathBuf> {
         env::current_dir()
             .map_err(|_| ConfigError::WorkingDir)
     }
@@ -86,11 +88,11 @@ impl ConfigBuilder {
     /// ConfigBuilder, if not, it just returns ConfigBuilder
     /// without making change in disk/config
 
-    pub fn new() -> Result<Self, ConfigError> {
+    pub fn new() -> Result<Self> {
         Self::read()
     }
     
-    pub fn defaults() -> Result<Self, ConfigError> {
+    pub fn default() -> Result<Self> {
         Ok(Self {
             disable_timeout: Config::default_disable_timeout(),
             timeout_ms: Config::default_timeout_ms().as_millis(),
@@ -98,11 +100,11 @@ impl ConfigBuilder {
         })
     }
     
-    pub fn set_default() -> Result<Self, ConfigError> {
-        Self::defaults()?.generate()
+    pub fn set_default() -> Result<Self> {
+        Self::default()?.generate()
     }
 
-    pub fn set_disable_timeout(mut self, disable: Option<bool>) -> Result<Self, ConfigError> {
+    pub fn set_disable_timeout(mut self, disable: Option<bool>) -> Result<Self> {
         match disable {
             Some(dis) => {
                 self.disable_timeout = dis;
@@ -124,7 +126,7 @@ impl ConfigBuilder {
         &self.working_dir
     }
     
-    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Result<Self, ConfigError> {
+    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Result<Self> {
         match timeout_ms {
             Some(timeout) => {
                 self.timeout_ms = timeout as u128;
@@ -134,7 +136,7 @@ impl ConfigBuilder {
         }
     }
 
-    pub fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Result<Self, ConfigError> {
+    pub fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Result<Self> {
         match working_dir {
             Some(dir) => {
                 self.working_dir = dir;
@@ -151,7 +153,7 @@ impl ConfigBuilder {
     /// because it allows us to do various kinds of stuff
     /// but we dont want to store Duration struct instance on disk,
     /// we want a clean timeout_ms: u128.
-    pub fn generate(self) -> Result<Self, ConfigError> {
+    pub fn generate(self) -> Result<Self> {
         let config = toml::to_string_pretty(
             &ConfigBuilder {
                 disable_timeout: self.disable_timeout,
@@ -159,7 +161,7 @@ impl ConfigBuilder {
                 working_dir: self.working_dir.clone()
             }
         )
-        .map_err(|_| ConfigError::Prepare)?;
+        .map_err(ConfigError::Prepare)?;
 
         fs::write(&NAME_TOML, config)
             .map_err(|_| ConfigError::Write)?;
@@ -171,7 +173,7 @@ impl ConfigBuilder {
     /// and if the file doesn't exist, return the default config.
     /// 
     /// This doesn't create or change the config on disk
-    pub fn read() -> Result<Self, ConfigError> {
+    pub fn read() -> Result<Self> {
         let config = if PathBuf::from(NAME_TOML).exists() {
             // let file = fs::File::open(NAME_TOML)
             //     .map_err(ConfigError::Open)?;
@@ -179,10 +181,10 @@ impl ConfigBuilder {
             let content = fs::read_to_string(NAME_TOML)
                 .map_err(ConfigError::Read)?;
             toml::from_str(&content)
-                .map_err(|_| ConfigError::Parse)? 
+                .map_err(ConfigError::Parse)? 
             
         } else {
-            Self::defaults()?.generate()?
+            Self::default()?.generate()?
         };
         Ok(config)
     }

@@ -236,10 +236,11 @@ fn main() -> Result<(), Error> {
             environment = environment.execute_request(request)?;
             
             // Get the result form the environment and replace the old default result
-            result = environment.result()?;
+            result = environment.result()?.to_owned();
             
             let _ = run::handle_run(&mut result, program, args, verbose);
-            // println!("Environment what{:?}", environment.what()?)
+
+            println!("{environment}");
         }
         Commands::Test => {
             let _ = test::handle_test(&mut result, verbose);

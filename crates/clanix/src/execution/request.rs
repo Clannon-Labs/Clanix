@@ -22,6 +22,24 @@ pub struct ExecutionRequest {
     pub(crate) policy: Policy,
 }
 
+impl std::fmt::Display for ExecutionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "\nExecution Request")?;
+        writeln!(f, "--------\n")?;
+        writeln!(f, "Program: {}", self.program.display())?;
+
+        if !self.args.is_empty() {
+            // This {:#?} should pretty print, maybe??
+            writeln!(f, "Arguments: {:#?}", self.args)?;
+        }
+
+        // We keep policy string blank because Policy itself implements
+        // its Display version
+        writeln!(f, "{}\n", self.policy)?;
+        
+        Ok(())
+    }
+}
 
 impl ExecutionRequest {
     pub fn default() -> Result<Self> {

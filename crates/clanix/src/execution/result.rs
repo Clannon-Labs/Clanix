@@ -43,7 +43,7 @@ fn str_to_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 impl std::fmt::Display for ExecutionResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\nExecution Result")?;
-        writeln!(f, "----------------")?;
+        writeln!(f, "----------------\n")?;
         writeln!(f, "ID: {}", self.id)?;
         writeln!(f, "Success: {}", self.success)?;
 

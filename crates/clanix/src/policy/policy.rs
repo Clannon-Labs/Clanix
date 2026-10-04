@@ -14,6 +14,21 @@ pub struct Policy {
     pub(crate) working_dir: PathBuf,
 }
 
+impl std::fmt::Display for Policy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "\nPolicy")?;
+        writeln!(f, "-------\n")?;
+        writeln!(f, "Disable timeout? {}", self.disable_timeout)?;
+
+        // Print the timeout is milliseconds
+        writeln!(f, "Timeout ms: {}", self.timeout_ms.as_millis())?;
+
+        writeln!(f, "\nWorking directory: {}\n", self.working_dir.display())?;
+        
+        Ok(())
+    }
+}
+
 type Result<T> = std::result::Result<T, PolicyError>;
 
 /*

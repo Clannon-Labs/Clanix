@@ -55,8 +55,9 @@ impl Environment {
         Ok(&self.request)
     }
 
-    pub fn result(self) -> Result<ExecutionResult> {
+    pub fn result(&self) -> Result<&ExecutionResult> {
         self.result
+            .as_ref()
             .ok_or_else(|| Error::Result(ResultError::Empty)) 
     }
     
@@ -68,4 +69,24 @@ impl Environment {
         Ok(&self.request.policy)
     }
 
+}
+
+impl std::fmt::Display for Environment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "ENVIRONMENT")?;
+        writeln!(f, "{}", self.request)?;
+
+        // Print result only if it has some value,
+        // if not, print None.
+        // 
+        // We used this check to avoid printing it as Some()
+        // in the terminal
+        if let Some(result) = &self.result {
+            writeln!(f, "{}", result)?;
+        } else {
+            writeln!(f, "Result: None")?;
+        }
+        
+        Ok(())
+    }
 }

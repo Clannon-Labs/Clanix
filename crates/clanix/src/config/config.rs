@@ -43,6 +43,20 @@ pub struct ConfigBuilder {
     working_dir: PathBuf,
 }
 
+impl std::fmt::Display for ConfigBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "\nConfig")?;
+        writeln!(f, "-------")?;
+
+        writeln!(f, "Disable timeout? {}", self.disable_timeout)?;
+        writeln!(f, "Timeout ms: {}", self.timeout_ms)?; // already in ms
+
+        writeln!(f, "\nWorking directory: {}\n", self.working_dir.display())?;
+        
+        Ok(())
+    }
+}
+
 impl Config {
      /* Incase of Config, new() gives the new instance of what already exists on disk,
      * you can call default() on ConfigBuilder if you explicitly want the instance with
@@ -67,7 +81,7 @@ impl Config {
     /// Default timeout_ms of 1ms is just for experimentation
     /// and will be changed in future so it's more realistic
     pub fn default_timeout_ms() -> Duration {
-        Duration::from_millis(1)
+        Duration::from_secs(10)
     }
     
     pub fn default_working_dir() -> Result<PathBuf> {

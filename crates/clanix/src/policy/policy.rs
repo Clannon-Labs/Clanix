@@ -20,8 +20,7 @@ impl std::fmt::Display for Policy {
         writeln!(f, "-------\n")?;
         writeln!(f, "Disable timeout? {}", self.disable_timeout)?;
 
-        // Print the timeout is milliseconds
-        writeln!(f, "Timeout ms: {}", self.timeout_s.as_millis())?;
+        writeln!(f, "Timeout seconds: {:?}", self.timeout_s)?;
 
         writeln!(f, "\nWorking directory: {}\n", self.working_dir.display())?;
         

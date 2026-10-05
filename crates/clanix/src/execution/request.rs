@@ -30,12 +30,12 @@ impl std::fmt::Display for ExecutionRequest {
 
         if !self.args.is_empty() {
             // This {:#?} should pretty print, maybe??
-            writeln!(f, "Arguments: {:#?}", self.args)?;
+            writeln!(f, "Arguments: {:?}", self.args)?;
         }
 
         // We keep policy string blank because Policy itself implements
         // its Display version
-        writeln!(f, "{}\n", self.policy)?;
+        writeln!(f, "{}", self.policy)?;
         
         Ok(())
     }

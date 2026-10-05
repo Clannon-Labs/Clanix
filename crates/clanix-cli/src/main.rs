@@ -133,7 +133,7 @@ enum Commands {
     Config {
         #[command(subcommand)]
         configcommand: ConfigCommands,
-    }
+    },
 }
 
 #[derive(Subcommand, Debug)]

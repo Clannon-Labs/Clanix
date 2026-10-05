@@ -74,6 +74,7 @@ impl Environment {
 impl std::fmt::Display for Environment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "ENVIRONMENT")?;
+        writeln!(f, "============")?;
         writeln!(f, "{}", self.request)?;
 
         // Print result only if it has some value,

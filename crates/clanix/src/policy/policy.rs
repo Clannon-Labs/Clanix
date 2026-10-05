@@ -10,7 +10,7 @@ use crate::PolicyError;
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Policy {
     pub(crate) disable_timeout: bool,
-    pub(crate) timeout_ms: Duration,
+    pub(crate) timeout_s: Duration,
     pub(crate) working_dir: PathBuf,
 }
 
@@ -21,7 +21,7 @@ impl std::fmt::Display for Policy {
         writeln!(f, "Disable timeout? {}", self.disable_timeout)?;
 
         // Print the timeout is milliseconds
-        writeln!(f, "Timeout ms: {}", self.timeout_ms.as_millis())?;
+        writeln!(f, "Timeout ms: {}", self.timeout_s.as_millis())?;
 
         writeln!(f, "\nWorking directory: {}\n", self.working_dir.display())?;
         
@@ -40,7 +40,7 @@ impl Policy {
     pub fn default() -> Result<Self> {
         Ok(Self {
             disable_timeout: Config::default_disable_timeout(),
-            timeout_ms: Config::default_timeout_ms(),
+            timeout_s: Config::default_timeout_s(),
             working_dir: Config::default_working_dir()?,
         })
     }
@@ -51,8 +51,8 @@ impl Policy {
     }
 
 
-    pub fn timeout_ms(&self) -> Duration {
-        self.timeout_ms
+    pub fn timeout_s(&self) -> Duration {
+        self.timeout_s
     }
     
     pub fn disable_timeout(&self) -> bool {
@@ -63,20 +63,20 @@ impl Policy {
         &self.working_dir
     }
     
-    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Result<Self> {
+    pub fn set_timeout_s(mut self, timeout_s: Option<u64>) -> Result<Self> {
         /*
-         * If user gives the timeout_ms, which makes timeout_ms: Some(),
-         * set the timeout_ms for now to that.
-         * If not, read the timeout_ms from config and set the
-         * timeout_ms to that
+         * If user gives the timeout_s, which makes timeout_s: Some(),
+         * set the timeout_s for now to that.
+         * If not, read the timeout_s from config and set the
+         * timeout_s to that
          */
-        match timeout_ms {
+        match timeout_s {
             Some(millis) => {
-                self.timeout_ms = Duration::from_millis(millis);
+                self.timeout_s = Duration::from_millis(millis);
                 return Ok(self)
             },
             None => {
-                self.timeout_ms = Config::read()?.timeout_ms();
+                self.timeout_s = Config::read()?.timeout_s();
                 return Ok(self)
             }
         }

@@ -32,14 +32,14 @@ const NAME_TOML: &str = "clanix.toml";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub(crate) disable_timeout: bool,
-    pub(crate) timeout_ms: Duration,
+    pub(crate) timeout_s: Duration,
     pub(crate) working_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigBuilder {
     disable_timeout: bool,
-    timeout_ms: u128,
+    timeout_s: u64,
     working_dir: PathBuf,
 }
 
@@ -48,8 +48,14 @@ impl std::fmt::Display for ConfigBuilder {
         writeln!(f, "\nConfig")?;
         writeln!(f, "-------")?;
 
-        writeln!(f, "Disable timeout? {}", self.disable_timeout)?;
-        writeln!(f, "Timeout ms: {}", self.timeout_ms)?; // already in ms
+        if self.disable_timeout() {
+            writeln!(f, "Timeout: disabled")?;
+        } else {
+            writeln!(f, "Timeout: enabled")?;
+        }
+        
+        // writeln!(f, "Disable timeout? {}", self.disable_timeout)?;
+        writeln!(f, "Timeout seconds: {}", self.timeout_s)?; 
 
         writeln!(f, "\nWorking directory: {}\n", self.working_dir.display())?;
         
@@ -78,12 +84,12 @@ impl Config {
         ConfigBuilder::default()?.generate()
     }
     
-    /// Default timeout_ms of 1ms is just for experimentation
+    /// Default timeout_s of 1ms is just for experimentation
     /// and will be changed in future so it's more realistic
-    pub fn default_timeout_ms() -> Duration {
-        Duration::from_secs(10)
+    pub fn default_timeout_s() -> Duration {
+        Duration::from_secs(60)
     }
-    
+    // secs
     pub fn default_working_dir() -> Result<PathBuf> {
         env::current_dir()
             .map_err(|_| ConfigError::WorkingDir)
@@ -109,7 +115,7 @@ impl ConfigBuilder {
     pub fn default() -> Result<Self> {
         Ok(Self {
             disable_timeout: Config::default_disable_timeout(),
-            timeout_ms: Config::default_timeout_ms().as_millis(),
+            timeout_s: Config::default_timeout_s().as_secs(),
             working_dir: Config::default_working_dir()?
         })
     }
@@ -128,8 +134,8 @@ impl ConfigBuilder {
         }
     }
 
-    pub fn timeout_ms(&self) -> Duration {
-        Duration::from_millis(self.timeout_ms as u64)
+    pub fn timeout_s(&self) -> Duration {
+        Duration::from_secs(self.timeout_s)
     }
     
     pub fn disable_timeout(&self) -> bool {
@@ -140,10 +146,10 @@ impl ConfigBuilder {
         &self.working_dir
     }
     
-    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Result<Self> {
-        match timeout_ms {
+    pub fn set_timeout_s(mut self, timeout_s: Option<u64>) -> Result<Self> {
+        match timeout_s {
             Some(timeout) => {
-                self.timeout_ms = timeout as u128;
+                self.timeout_s = timeout;
                 self.generate() // make changes to disk
             },
             None => return Ok(self)
@@ -162,16 +168,16 @@ impl ConfigBuilder {
     
     /// Create the ConfigBuilder struct instance and write on disk
     /// 
-    /// Here, we dont write the instance of Config because the timeout_ms
+    /// Here, we dont write the instance of Config because the timeout_s
     /// inside Config which we use to do operations is in Duration form,
     /// because it allows us to do various kinds of stuff
     /// but we dont want to store Duration struct instance on disk,
-    /// we want a clean timeout_ms: u128.
+    /// we want a clean timeout_s: u128.
     pub fn generate(self) -> Result<Self> {
         let config = toml::to_string_pretty(
             &ConfigBuilder {
                 disable_timeout: self.disable_timeout,
-                timeout_ms: self.timeout_ms,
+                timeout_s: self.timeout_s,
                 working_dir: self.working_dir.clone()
             }
         )

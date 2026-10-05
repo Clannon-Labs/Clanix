@@ -98,7 +98,7 @@ struct CliInput {
     #[arg(
         short,
         long,
-        help = "The actual timeout you want to set"
+        help = "The actual timeout you want to set(in seconds)"
     )]
     timeout: Option<u64>,
 }
@@ -156,9 +156,9 @@ enum ConfigCommands {
         #[arg(
             short, 
             long,
-            help = "Change/set the config value stored in timeout_ms"
+            help = "Change/set the config value stored in timeout_s"
         )]
-        timeout_ms: Option<u64>,
+        timeout_s: Option<u64>,
 
         #[arg(
             long = "working-dir",
@@ -180,9 +180,9 @@ enum ConfigCommands {
         #[arg(
             short, 
             long,
-            help = "Get the config value stored in timeout_ms"
+            help = "Get the config value stored in timeout_s"
         )]
-        timeout_ms: bool,
+        timeout_s: bool,
 
         #[arg(
             long = "working-dir",
@@ -226,7 +226,7 @@ fn main() -> Result<(), Error> {
             let request = environment.new_request(&program)?
                     .args(&args)
                     .set_disable_timeout(disable_timeout)?
-                    .set_timeout_ms(timeout)?
+                    .set_timeout_s(timeout)?
                     .set_working_dir(working_dir)?;
 
             // IMPORTANT: Execute the request in that environment because

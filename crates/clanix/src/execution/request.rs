@@ -60,11 +60,11 @@ impl ExecutionRequest {
             */
         
         let working_dir = &self.policy.working_dir();
-        let timeout_ms = self.policy.timeout_ms();
+        let timeout_s = self.policy.timeout_s();
         let disable_timeout = self.policy.disable_timeout();
 
         // println!("Current working directory is {:?}", &working_dir);
-        // println!("Timeout_ms: {:?}", timeout_ms);
+        // println!("Timeout_s: {:?}", timeout_s);
         // println!("Timeout disable: {}", disable_timeout);
         
         let mut child = Command::new(&self.program)
@@ -112,12 +112,12 @@ impl ExecutionRequest {
             let elapsed_time = start_time.elapsed();
             // if the process has ran for already over the timeout,
             // kill it before you do anything else
-            // println!("About to check disable_timeout: {} and timeout_ms: {:?}", disable_timeout, timeout_ms);
-            if (disable_timeout == false) && elapsed_time >= timeout_ms {
+            // println!("About to check disable_timeout: {} and timeout_s: {:?}", disable_timeout, timeout_s);
+            if (disable_timeout == false) && elapsed_time >= timeout_s {
                 let _ = child.kill();
                 println!(
                     "Process ran for {:?} while the timeout was {:?}",
-                    elapsed_time, timeout_ms
+                    elapsed_time, timeout_s
                 );
                 break;
             }
@@ -187,8 +187,8 @@ impl ExecutionRequest {
     // the individual policy key
     // These functions are for setting the individual
     // policy keys
-    pub fn set_timeout_ms(mut self, timeout_ms: Option<u64>) -> Result<Self> {
-        self.policy = Policy::set_timeout_ms(self.policy, timeout_ms)?;        
+    pub fn set_timeout_s(mut self, timeout_s: Option<u64>) -> Result<Self> {
+        self.policy = Policy::set_timeout_s(self.policy, timeout_s)?;        
         Ok(self)
     }
 

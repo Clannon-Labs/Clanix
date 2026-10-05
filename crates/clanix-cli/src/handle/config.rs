@@ -21,7 +21,7 @@ pub fn handle_config(
         * user wants so
         */
     
-    // println!("{disable_timeout:?}, {timeout_ms:?}, {working_dir:?}");
+    // println!("{disable_timeout:?}, {timeout_s:?}, {working_dir:?}");
     match configcommand {
         ConfigCommands::Default => {
             let config = Config::set_default()?;
@@ -40,10 +40,10 @@ pub fn handle_config(
         ConfigCommands::Init => {
             println!("Init is not developed yet!")
         },
-        ConfigCommands::Set {disable_timeout, timeout_ms, working_dir} => {
+        ConfigCommands::Set {disable_timeout, timeout_s, working_dir} => {
             let config = Config::read()?
                 .set_disable_timeout(disable_timeout)?
-                .set_timeout_ms(timeout_ms)?
+                .set_timeout_s(timeout_s)?
                 .set_working_dir(working_dir);
             
             if verbose {
@@ -56,17 +56,17 @@ pub fn handle_config(
                 let _ = result.set_stdout(message)?;
             }
         },
-        ConfigCommands::What{disable_timeout, timeout_ms, working_dir} => {
+        ConfigCommands::What{disable_timeout, timeout_s, working_dir} => {
             let config = Config::read()?;
             
             if disable_timeout {
-                println!("{:?}", config.disable_timeout())
-            } else if timeout_ms {
-                println!("{:?}", config.timeout_ms())
+                println!("{}", config.disable_timeout())
+            } else if timeout_s {
+                println!("{:?}", config.timeout_s())
             } else if working_dir {
-                println!("{:?}", config.working_dir())
+                println!("{}", config.working_dir().display())
             } else {
-                println!("{:?}", config)
+                println!("{}", config)
             }
         }
     }

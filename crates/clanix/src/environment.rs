@@ -35,12 +35,12 @@ impl Environment {
         })
     }
 
-    pub fn execute_request(mut self, request: ExecutionRequest) -> Result<Self> {
+    pub fn execute_request(&mut self, request: ExecutionRequest) -> Result<()> {
         let result = ExecutionRequest::execute(&request)?;
         self.request = request;
         self.result = Some(result);
 
-        Ok(self)
+        Ok(())
     }
     
     pub fn new_result(&self) -> Result<ExecutionResult> {

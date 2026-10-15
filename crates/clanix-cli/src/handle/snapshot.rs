@@ -2,14 +2,14 @@
 use std::fs;
 use std::path::PathBuf;
 
-use clanix::ExecutionResult;
+use clanix::Environment;
 
 use crate::OutputFormat;
 use crate::error::Result;
 
 
 pub fn handle_snapshot(
-    result: &mut ExecutionResult,
+    environment: &mut Environment,
     path: PathBuf,
     output_format: OutputFormat
 ) -> Result<()> {
@@ -17,6 +17,8 @@ pub fn handle_snapshot(
         // No verbose check because inside the match command block,
         // each command already wrote their verbose output
         OutputFormat::Text => {
+            let result = environment.result()?;
+            
             let final_path = result.working_dir().join(path);
             
             fs::write(&final_path, &result.stdout())?;
@@ -25,7 +27,9 @@ pub fn handle_snapshot(
             Ok(())
         },
         OutputFormat::Json => {
-            let final_path = result.working_dir().join(path);
+            let result = environment.result()?;
+            
+            let final_path = environment.result()?.working_dir().join(path);
             let output = result.to_json()?;
             
             fs::write(&final_path, &output)?;
@@ -34,6 +38,8 @@ pub fn handle_snapshot(
             Ok(())
         }
         OutputFormat::Toml => {
+            let result = environment.result()?;
+            
             let final_path = result.working_dir().join(path);
             let output = result.to_toml()?;
             

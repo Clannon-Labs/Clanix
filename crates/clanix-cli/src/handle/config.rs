@@ -1,7 +1,7 @@
 
 use clanix::{
     Config,
-    ExecutionResult,
+    Environment,
 };
 
 use crate::NAME;
@@ -10,7 +10,7 @@ use crate::ConfigCommands;
 use crate::error::Result;
 
 pub fn handle_config(
-    result: &mut ExecutionResult,
+    environment: &mut Environment,
     configcommand: ConfigCommands,
     verbose: bool,
 ) -> Result<()>{
@@ -24,37 +24,41 @@ pub fn handle_config(
     // println!("{disable_timeout:?}, {timeout_s:?}, {working_dir:?}");
     match configcommand {
         ConfigCommands::Default => {
-            let config = Config::set_default()?;
+            let _ = environment.set_default_config()?;
 
-            // println!("{config:?}");
-            if verbose {
-                let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
-                println!("{message}");
-                let _ = result.set_stdout(message)?;
+            let message = if verbose {
+                environment.to_string()
             } else {
-                let message = format!("{NAME}: Successfully set the config.\n");
-                println!("{message}");
-                let _ = result.set_stdout(message)?;
-            }
+                format!("{NAME}: Successfully set the config.\n")
+            };
+
+            println!("{message}");
+
+            let _ = environment.result_mut()?
+                .set_stdout(message)?;
+
         },
         ConfigCommands::Init => {
             println!("Init is not developed yet!")
         },
         ConfigCommands::Set {disable_timeout, timeout_s, working_dir} => {
-            let config = Config::read()?
+            let _ = Config::read()?
                 .set_disable_timeout(disable_timeout)?
                 .set_timeout_s(timeout_s)?
                 .set_working_dir(working_dir);
-            
-            if verbose {
-                let message = format!("{NAME}: Successfully set the following config:\n{config:?}\n");
-                println!("{message}");
-                let _ = result.set_stdout(message)?;
+
+            // println!("Config: {config:?}");
+
+            let message = if verbose {
+                environment.to_string()
             } else {
-                let message = format!("{NAME}: Successfully set the config.\n");
-                println!("{message}");
-                let _ = result.set_stdout(message)?;
-            }
+                format!("{NAME}: Successfully set the config.\n")
+            };
+
+            println!("{message}");
+
+            let _ = environment.result_mut()?
+                .set_stdout(message)?;
         },
         ConfigCommands::What{disable_timeout, timeout_s, working_dir} => {
             let config = Config::read()?;
@@ -71,6 +75,8 @@ pub fn handle_config(
         }
     }
 
+    let result = environment.result_mut()?;
+        
     let _ = result.set_success(true)?;
     let _ = result.set_status(Some(101))?;
     let _ = result.set_stderr("".to_string())?;

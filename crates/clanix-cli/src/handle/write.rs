@@ -2,31 +2,32 @@
 use std::fs;
 use std::path::PathBuf;
 
-use clanix::ExecutionResult;
+use clanix::Environment;
 
 use crate::NAME;
 use crate::error::Result;
 
 pub fn handle_write(
-    result: &mut ExecutionResult, 
+    environment: &mut Environment,
     verbose: bool, 
     path: PathBuf, 
     content: String
 ) -> Result<()> {
+
+    let result = environment.result()?;
+        
     let final_path = result.working_dir().join(path);
     fs::write(&final_path, &content)?; 
 
-    if verbose {
-        let message = format!(
-            "{NAME} [SIMULATED]: Request to write the content '{content}' to {final_path:?} was successful\n"
-        );
-        println!("{message}");
-        let _ = result.set_stdout(message)?;
+    let message = if verbose {
+        environment.to_string()
     } else {
-        let message = format!("[SIMULATED]: Wrote to {final_path:?}");
-        println!("{message}");
-        let _ = result.set_stdout(message)?;
-    }
+        format!("{NAME}: [SIMULATED]: Wrote to {final_path:?}")
+    };
+
+    println!("{message}");
+
+    let result = environment.result_mut()?;
 
     let _ = result.set_success(true)?;
     let _ = result.set_status(Some(101))?;

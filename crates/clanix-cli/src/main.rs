@@ -218,12 +218,12 @@ fn main() -> Result<(), Error> {
     let mut environment = Environment::new()?;
     
     // Get the result type
-    let mut result = environment.new_result()?;
+    // let mut result = environment.new_result()?;
 
     match command {
         Commands::Run { program, args } => {
             
-            result = run::handle_run(
+            let _ = run::handle_run(
                 &mut environment,
                 program,
                 args,
@@ -236,19 +236,19 @@ fn main() -> Result<(), Error> {
             // println!("{environment}");
         }
         Commands::Test => {
-            let _ = test::handle_test(&mut result, verbose);
+            let _ = test::handle_test(&mut environment, verbose);
         }
         Commands::Write { content, path } => {
-            let _ = write::handle_write(&mut result, verbose, path, content);
+            let _ = write::handle_write(&mut environment, verbose, path, content);
         },
         Commands::Config {configcommand} => {
-            let _ = config::handle_config(&mut result, configcommand, verbose);
+            let _ = config::handle_config(&mut environment, configcommand, verbose);
         }
     }
 
     match snapshot {
         Some(path) => {
-            let _ = snapshot::handle_snapshot(&mut result, path, output_format);
+            let _ = snapshot::handle_snapshot(&mut environment, path, output_format);
         }
         None => {}
     }

@@ -31,8 +31,8 @@ pub fn handle_run(
     // 
     let _ = environment.execute_request(request)?;
     
-    // Get the result form the environment and replace the old default result
-    let mut result = environment.result()?.to_owned();
+    // Get the result from the environment and replace the old default result
+    let result = environment.result()?.to_owned();
         
     let args = args.join(" ");
     
@@ -51,16 +51,18 @@ pub fn handle_run(
         };
         
         let final_output = output.clone().into_owned();
-        if verbose {
-            // let message = format!("{NAME}: Command {program} {args} was ran successfully!\n{final_output}\n");
-            let message = environment.to_string();
-            println!("{message}");
-            let _ = result.set_stdout(message)?;
-        } else {
-            let message = format!("{NAME}: {program} {args} was successful!\n{final_output}\n");
-            println!("{message}");
-            let _ = result.set_stdout(message)?;
-        }
+
+        let message = if verbose {
+                environment.to_string()
+            } else {
+                format!("{NAME}: {program} {args} was successful!\n{final_output}\n")
+            };
+
+        println!("{message}");
+
+        let _ = environment.result_mut()?
+            .set_stdout(message)?;
+        
     } else {
         let output = if !stderr_output.trim().is_empty() {
             stderr_output
@@ -69,15 +71,17 @@ pub fn handle_run(
         };
 
         let final_output = output.clone().into_owned();
-        if verbose {
-            let message = environment.to_string();
-            eprintln!("{message}");
-            let _ = result.set_stderr(final_output)?;
+
+        let message = if verbose {
+            environment.to_string()
         } else {
-            let message = format!("{NAME}: {program} {args} failed!\n{output}\n");
-            eprintln!("{message}");
-            let _ = result.set_stderr(final_output)?;
-        }
+            format!("{NAME}: {program} {args} failed!\n{output}\n")
+        };
+
+        println!("{message}");
+
+        let _ = environment.result_mut()?
+            .set_stderr(final_output)?;
     }
 
     Ok(result)

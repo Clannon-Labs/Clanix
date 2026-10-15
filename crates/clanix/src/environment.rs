@@ -3,7 +3,7 @@ use std::ffi::OsString;
 
 use serde::Serialize;
 
-use crate::{ExecutionRequest, ExecutionResult};
+use crate::{Config, ExecutionRequest, ExecutionResult};
 use crate::Policy;
 use crate::ConfigBuilder;
 use crate::{Error, Result}; // get the default Error type automatically
@@ -46,6 +46,13 @@ impl Environment {
     pub fn new_result(&self) -> Result<ExecutionResult> {
         Ok(ExecutionResult::default())
     }
+
+    pub fn set_default_config(&mut self) -> Result<&ConfigBuilder> {
+        let config = Config::set_default()?;
+        self.config = config;
+        Ok(&self.config)
+        
+    }
     
     pub fn what(&self) -> Result<&Self> {
         Ok(&self)
@@ -60,9 +67,20 @@ impl Environment {
             .as_ref()
             .ok_or_else(|| Error::Result(ResultError::Empty)) 
     }
+
+    pub fn result_mut(&mut self) -> Result<&mut ExecutionResult> {
+        self.result
+            .as_mut()
+            .ok_or_else(|| Error::Result(ResultError::Empty))
+            
+    }
     
     pub fn config(&self) -> Result<&ConfigBuilder> {
         Ok(&self.config)
+    }
+
+    pub fn config_mut(&mut self) -> Result<&mut ConfigBuilder> {
+        Ok(&mut self.config)
     }
 
     pub fn policy(&self) -> Result<&Policy> {
@@ -73,8 +91,8 @@ impl Environment {
 
 impl std::fmt::Display for Environment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "ENVIRONMENT")?;
-        writeln!(f, "============")?;
+        writeln!(f, "\nENVIRONMENT")?;
+        writeln!(f, "=============")?;
         writeln!(f, "{}", self.request)?;
 
         // Print result only if it has some value,

@@ -1,5 +1,5 @@
 
-use clanix::{Environment, ExecutionResult};
+use clanix::Environment;
 
 use crate::NAME;
 use crate::error::Result;
@@ -16,7 +16,7 @@ pub fn handle_run(
     disable_timeout: bool,
     timeout: Option<u64>,
     working_dir: Option<std::path::PathBuf>
-) -> Result<ExecutionResult> {
+) -> Result<()> {
 
     // Run in that environment with these arguments
     let request = environment.new_request(&program)?
@@ -60,8 +60,8 @@ pub fn handle_run(
 
         println!("{message}");
 
-        let _ = environment.result_mut()?
-            .set_stdout(message)?;
+        // let _ = environment.result_mut()?
+            // .set_stdout(message)?;
         
     } else {
         let output = if !stderr_output.trim().is_empty() {
@@ -70,7 +70,7 @@ pub fn handle_run(
             stdout_output
         };
 
-        let final_output = output.clone().into_owned();
+        // let final_output = output.clone().into_owned();
 
         let message = if verbose {
             environment.to_string()
@@ -80,10 +80,10 @@ pub fn handle_run(
 
         println!("{message}");
 
-        let _ = environment.result_mut()?
-            .set_stderr(final_output)?;
+        // let _ = environment.result_mut()?
+            // .set_stderr(final_output)?;
     }
 
-    Ok(result)
+    Ok(())
 
 }

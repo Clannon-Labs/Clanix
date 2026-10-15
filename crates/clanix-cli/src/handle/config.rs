@@ -34,8 +34,8 @@ pub fn handle_config(
 
             println!("{message}");
 
-            let _ = environment.result_mut()?
-                .set_stdout(message)?;
+            // let _ = environment.result_mut()?
+                // .set_stdout(message)?;
 
         },
         ConfigCommands::Init => {
@@ -57,8 +57,8 @@ pub fn handle_config(
 
             println!("{message}");
 
-            let _ = environment.result_mut()?
-                .set_stdout(message)?;
+            // let _ = environment.result_mut()?
+                // .set_stdout(message)?;
         },
         ConfigCommands::What{disable_timeout, timeout_s, working_dir} => {
             let config = Config::read()?;

@@ -217,9 +217,6 @@ fn main() -> Result<(), Error> {
     // Create a new environment for execution
     let mut environment = Environment::new()?;
     
-    // Get the result type
-    // let mut result = environment.new_result()?;
-
     match command {
         Commands::Run { program, args } => {
             

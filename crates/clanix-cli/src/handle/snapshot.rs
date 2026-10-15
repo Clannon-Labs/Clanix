@@ -16,34 +16,29 @@ pub fn handle_snapshot(
     match output_format {
         // No verbose check because inside the match command block,
         // each command already wrote their verbose output
-        OutputFormat::Text => {
-            let result = environment.result()?;
+        OutputFormat::Text => {            
+            let final_path = environment.result()?
+                .working_dir().join(path);
             
-            let final_path = result.working_dir().join(path);
-            
-            fs::write(&final_path, &result.stdout())?;
+            fs::write(&final_path, &environment.to_string())?;
             println!("Wrote stdout to {final_path:?}");
             
             Ok(())
         },
-        OutputFormat::Json => {
-            let result = environment.result()?;
+        OutputFormat::Json => {            
+            let final_path = environment.result()?
+                .working_dir().join(path);
             
-            let final_path = environment.result()?.working_dir().join(path);
-            let output = result.to_json()?;
-            
-            fs::write(&final_path, &output)?;
+            fs::write(&final_path, &environment.to_json()?)?;
             println!("Wrote stdout to {final_path:?}");
             
             Ok(())
         }
-        OutputFormat::Toml => {
-            let result = environment.result()?;
+        OutputFormat::Toml => {            
+            let final_path = environment.result()?
+                .working_dir().join(path);
             
-            let final_path = result.working_dir().join(path);
-            let output = result.to_toml()?;
-            
-            fs::write(&final_path, &output)?;
+            fs::write(&final_path, &environment.to_toml()?)?;
             println!("Wrote stdout to {final_path:?}");
             
             Ok(())

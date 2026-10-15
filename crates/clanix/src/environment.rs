@@ -89,6 +89,17 @@ impl Environment {
 
 }
 
+impl Environment {
+    pub fn to_json(&self) -> Result<String> {
+        serde_json::to_string_pretty(self).map_err(Error::from)
+    }
+
+    pub fn to_toml(&self) -> Result<String> {
+        toml::to_string_pretty(self).map_err(Error::from)
+    }
+}
+
+
 impl std::fmt::Display for Environment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\nENVIRONMENT")?;

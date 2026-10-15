@@ -1,5 +1,5 @@
 
-use clanix::ExecutionResult;
+use clanix::{Environment, ExecutionResult};
 
 use crate::NAME;
 use crate::error::Result;
@@ -9,10 +9,31 @@ use crate::error::Result;
 // 
 // But the error types needed for it are already made in crate::error
 pub fn handle_run(
-    result: &mut ExecutionResult,
+    environment: &mut Environment,
     program: String,
     args: Vec<String>,
-    verbose: bool) -> Result<()> {
+    verbose: bool,
+    disable_timeout: bool,
+    timeout: Option<u64>,
+    working_dir: Option<std::path::PathBuf>
+) -> Result<ExecutionResult> {
+
+    // Run in that environment with these arguments
+    let request = environment.new_request(&program)?
+            .args(&args)
+            .set_disable_timeout(disable_timeout)?
+            .set_timeout_s(timeout)?
+            .set_working_dir(working_dir)?;
+        
+    // IMPORTANT: Execute the request in that environment because
+    // running the request outside of the environment will make the
+    // request and error drift apart from the rest of the environment..
+    // 
+    let _ = environment.execute_request(request)?;
+    
+    // Get the result form the environment and replace the old default result
+    let mut result = environment.result()?.to_owned();
+        
     let args = args.join(" ");
     
     let stdout_output = &result.stdout_string();
@@ -31,7 +52,8 @@ pub fn handle_run(
         
         let final_output = output.clone().into_owned();
         if verbose {
-            let message = format!("{NAME}: Command {program} {args} was ran successfully!\n{final_output}\n");
+            // let message = format!("{NAME}: Command {program} {args} was ran successfully!\n{final_output}\n");
+            let message = environment.to_string();
             println!("{message}");
             let _ = result.set_stdout(message)?;
         } else {
@@ -48,7 +70,7 @@ pub fn handle_run(
 
         let final_output = output.clone().into_owned();
         if verbose {
-            let message = format!("{NAME}: Command {program} {args} failed!\n{output}\n");
+            let message = environment.to_string();
             eprintln!("{message}");
             let _ = result.set_stderr(final_output)?;
         } else {
@@ -58,6 +80,6 @@ pub fn handle_run(
         }
     }
 
-    Ok(())
+    Ok(result)
 
 }

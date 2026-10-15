@@ -222,25 +222,18 @@ fn main() -> Result<(), Error> {
 
     match command {
         Commands::Run { program, args } => {
-            // Run in that environment with these arguments
-            let request = environment.new_request(&program)?
-                    .args(&args)
-                    .set_disable_timeout(disable_timeout)?
-                    .set_timeout_s(timeout)?
-                    .set_working_dir(working_dir)?;
-
-            // IMPORTANT: Execute the request in that environment because
-            // running the request outside of the environment will make the
-            // request and error drift apart from the rest of the environment..
-            // 
-            environment = environment.execute_request(request)?;
             
-            // Get the result form the environment and replace the old default result
-            result = environment.result()?.to_owned();
-            
-            let _ = run::handle_run(&mut result, program, args, verbose);
+            result = run::handle_run(
+                &mut environment,
+                program,
+                args,
+                verbose,
+                disable_timeout,
+                timeout,
+                working_dir
+            )?;
 
-            println!("{environment}");
+            // println!("{environment}");
         }
         Commands::Test => {
             let _ = test::handle_test(&mut result, verbose);

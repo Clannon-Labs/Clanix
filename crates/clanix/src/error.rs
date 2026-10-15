@@ -19,6 +19,12 @@ pub enum Error {
     // to convert policy error back to request error
     #[error("Invalid execution config")]
     Config(#[from] ConfigError),
+
+    #[error("Couldn't convert to json")]
+    JsonError(#[from] serde_json::Error),
+
+    #[error("Couldn't convert to toml")]
+    TomlError(#[from] toml::ser::Error),
     
     #[error("Unknown stage found!")]
     Unknown,
@@ -48,6 +54,12 @@ pub enum RequestError {
 
     #[error("Argument(s) is invalid")]
     InvalidArgs,
+
+    #[error("Couldn't convert to json")]
+    JsonError(#[from] serde_json::Error),
+
+    #[error("Couldn't convert to toml")]
+    TomlError(#[from] toml::ser::Error),
 }
 
 #[derive(Debug, ThisError)]
@@ -111,9 +123,12 @@ pub enum ConfigError {
     Write,
 
     #[error("Couldn't prepare config value!")]
-    Prepare(#[from] toml::ser::Error),
+    PrepareToml(#[from] toml::ser::Error),
 
     #[error("Couldn't parse config value!")]
-    Parse(#[from] toml::de::Error),
+    ParseToml(#[from] toml::de::Error),
+
+    #[error("Error occured in json")]
+    JsonError(#[from] serde_json::Error),
 }
 

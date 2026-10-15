@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Serialize, Deserialize};
-// use serde_json;
+use serde_json;
 use toml;
 
 use crate::ConfigError;
@@ -89,7 +89,7 @@ impl Config {
     pub fn default_timeout_s() -> Duration {
         Duration::from_secs(60)
     }
-    // secs
+    
     pub fn default_working_dir() -> Result<PathBuf> {
         env::current_dir()
             .map_err(|_| ConfigError::WorkingDir)
@@ -124,6 +124,16 @@ impl ConfigBuilder {
         Self::default()?.generate()
     }
 
+    pub fn to_json(&self) -> Result<String> {
+        serde_json::to_string_pretty(self)
+            .map_err(|e| ConfigError::JsonError(e))
+    }
+
+    pub fn to_toml(&self) -> Result<String> {
+        toml::to_string_pretty(self)
+            .map_err(|e| ConfigError::PrepareToml(e))
+    }
+    
     pub fn set_disable_timeout(mut self, disable: Option<bool>) -> Result<Self> {
         match disable {
             Some(dis) => {
@@ -181,7 +191,7 @@ impl ConfigBuilder {
                 working_dir: self.working_dir.clone()
             }
         )
-        .map_err(ConfigError::Prepare)?;
+        .map_err(ConfigError::PrepareToml)?;
 
         fs::write(&NAME_TOML, config)
             .map_err(|_| ConfigError::Write)?;
@@ -201,7 +211,7 @@ impl ConfigBuilder {
             let content = fs::read_to_string(NAME_TOML)
                 .map_err(ConfigError::Read)?;
             toml::from_str(&content)
-                .map_err(ConfigError::Parse)? 
+                .map_err(ConfigError::ParseToml)? 
             
         } else {
             Self::default()?.generate()?

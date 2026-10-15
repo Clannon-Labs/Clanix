@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use std::time::{Instant, Duration};
 
 use uuid::Uuid;
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 use crate::Policy;
 
@@ -15,13 +15,68 @@ use super::ExecutionResult;
 use crate::RequestError;
 use crate::Result;
 
+use crate::Error;
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
+    #[serde(
+        serialize_with = "serialize_os_string",
+        deserialize_with = "deserialize_os_string"
+    )]
     pub(crate) program: OsString,
+    #[serde(
+        serialize_with = "serialize_os_strings",
+        deserialize_with = "deserialize_os_strings"
+    )]
     pub(crate) args: Vec<OsString>,
     pub(crate) policy: Policy,
 }
 
+fn serialize_os_string<S>(
+    value: &OsString,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer, 
+    {
+        value.to_string_lossy().serialize(serializer)
+    }
+
+fn deserialize_os_string<'de, D> (
+    deserializer: D
+) -> std::result::Result<OsString, D::Error> 
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(OsString::from)
+    }
+
+fn serialize_os_strings<S>(
+    values: &[OsString],
+    serializer: S
+) -> std::result::Result<S::Ok, S::Error> 
+    where
+        S: Serializer,
+    {
+        values
+            .iter()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .serialize(serializer)
+    }
+
+fn deserialize_os_strings<'de, D>(
+    deserializer: D
+) -> std::result::Result<Vec<OsString>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Vec::<String>::deserialize(deserializer)
+            .map(|values| values.into_iter()
+                .map(OsString::from)
+                .collect())
+    }
+    
 impl std::fmt::Display for ExecutionRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\nExecution Request")?;
@@ -200,5 +255,15 @@ impl ExecutionRequest {
     pub fn set_working_dir(mut self, directory: Option<PathBuf>) -> Result<Self> {
         self.policy = Policy::set_working_dir(self.policy, directory)?;
         Ok(self)
+    }
+
+    pub fn to_json(&self) -> Result<String> {
+        serde_json::to_string_pretty(&self)
+            .map_err(|e| Error::Request(RequestError::JsonError(e)))
+    }
+
+    pub fn to_toml(&self) -> Result<String> {
+        toml::to_string_pretty(&self)
+            .map_err(|e| Error::Request(RequestError::TomlError(e)))
     }
 }

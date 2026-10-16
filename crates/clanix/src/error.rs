@@ -12,6 +12,9 @@ pub enum Error {
     #[error("Result stage failed: {0}")]
     Result(#[from] ResultError),
 
+    #[error("Project detection failed")]
+    Detect(#[from] std::io::Error),
+    
     // to convert policy error back to request error
     #[error("Invalid execution policy")]
     Policy(#[from] PolicyError),

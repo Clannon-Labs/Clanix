@@ -22,6 +22,7 @@ mod error;
 mod execution;
 mod policy;
 mod environment;
+mod detector;
 
 // Custom crates
 pub use policy::*;
@@ -30,3 +31,5 @@ pub use execution::*;
 pub use environment::*;
 
 pub use error::*;
+
+pub use detector::*;

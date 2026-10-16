@@ -24,7 +24,10 @@ use clap::{
 };
 use serde::{Deserialize, Serialize};
 
-use clanix::Environment;
+use clanix::{
+    Environment,
+    Detector,
+};
 
 const NAME: &str = "Clanix";
 
@@ -119,6 +122,9 @@ enum Commands {
 
     #[command(about = "Initialize the clanix project")]
     Init,
+
+    #[command(about = "Detect what project it is")]
+    What,
 
     /// To write some content to disk
     #[command(about = "To write some content to disk")]
@@ -237,6 +243,13 @@ fn main() -> Result<(), Error> {
         },
         Commands::Init => {
             println!("Init is not developed yet!")
+        },
+        Commands::What => {
+            let project = Detector::detect()?;
+            println!("{project:#?}");
+            let reason = project.why()?;
+            println!("{reason}");
+            println!("What is not developed yet!")
         },
         Commands::Write { content, path } => {
             let _ = write::handle_write(&mut environment, verbose, path, content);

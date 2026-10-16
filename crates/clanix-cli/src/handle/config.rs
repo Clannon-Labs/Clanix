@@ -23,29 +23,17 @@ pub fn handle_config(
     
     // println!("{disable_timeout:?}, {timeout_s:?}, {working_dir:?}");
     match configcommand {
-        ConfigCommands::Default => {
-            let _ = environment.set_default_config()?;
-
-            let message = if verbose {
-                environment.to_string()
+        ConfigCommands::Set {default, disable_timeout, timeout_s, working_dir} => {
+            if default {
+                let _ = environment.set_default_config()?;
+                
             } else {
-                format!("{NAME}: Successfully set the config.\n")
-            };
-
-            println!("{message}");
-
-            // let _ = environment.result_mut()?
-                // .set_stdout(message)?;
-
-        },
-        ConfigCommands::Set {disable_timeout, timeout_s, working_dir} => {
-            let _ = Config::read()?
-                .set_disable_timeout(disable_timeout)?
-                .set_timeout_s(timeout_s)?
-                .set_working_dir(working_dir);
-
-            // println!("Config: {config:?}");
-
+                let _ = Config::read()?
+                    .set_disable_timeout(disable_timeout)?
+                    .set_timeout_s(timeout_s)?
+                    .set_working_dir(working_dir);
+            }
+            
             let message = if verbose {
                 environment.to_string()
             } else {

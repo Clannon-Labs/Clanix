@@ -147,11 +147,14 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 enum ConfigCommands {
-    #[command(about = "Set the config back to the default (use carefully")]
-    Default,
-
     #[command(about = "Set/change individual config value.")]
     Set {
+        #[arg(
+            long,
+            help = "Set the config back to the default (use carefully"
+        )]
+        default: bool,
+        
         #[arg(
             long = "disable-timeout",
             visible_alias = "dt",
@@ -245,11 +248,13 @@ fn main() -> Result<(), Error> {
             println!("Init is not developed yet!")
         },
         Commands::What => {
-            let project = Detector::detect()?;
-            println!("{project:#?}");
-            let reason = project.why()?;
+            let detected = Detector::detect()?;
+            let project = detected.project()?;
+            println!("{project}");
+            
+            let reason = detected.why()?;
             println!("{reason}");
-            println!("What is not developed yet!")
+            // println!("What is not developed yet!")
         },
         Commands::Write { content, path } => {
             let _ = write::handle_write(&mut environment, verbose, path, content);

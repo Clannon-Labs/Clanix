@@ -38,9 +38,6 @@ pub fn handle_config(
                 // .set_stdout(message)?;
 
         },
-        ConfigCommands::Init => {
-            println!("Init is not developed yet!")
-        },
         ConfigCommands::Set {disable_timeout, timeout_s, working_dir} => {
             let _ = Config::read()?
                 .set_disable_timeout(disable_timeout)?

@@ -117,6 +117,9 @@ enum Commands {
     #[command(about = "Just simulates test for now, we can put actual testing in future")]
     Test,
 
+    #[command(about = "Initialize the clanix project")]
+    Init,
+
     /// To write some content to disk
     #[command(about = "To write some content to disk")]
     Write {
@@ -140,9 +143,6 @@ enum Commands {
 enum ConfigCommands {
     #[command(about = "Set the config back to the default (use carefully")]
     Default,
-
-    #[command(about = "Initialize the clanix project")]
-    Init,
 
     #[command(about = "Set/change individual config value.")]
     Set {
@@ -234,7 +234,10 @@ fn main() -> Result<(), Error> {
         }
         Commands::Test => {
             let _ = test::handle_test(&mut environment, verbose);
-        }
+        },
+        Commands::Init => {
+            println!("Init is not developed yet!")
+        },
         Commands::Write { content, path } => {
             let _ = write::handle_write(&mut environment, verbose, path, content);
         },

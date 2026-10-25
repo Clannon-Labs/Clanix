@@ -11,6 +11,8 @@ clanix.json
 clanix.toml
 smt.*
 
+exp*
+
 /temp/
 draft*.*
 /draft*/

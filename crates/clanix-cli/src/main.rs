@@ -249,11 +249,11 @@ fn main() -> Result<(), Error> {
         },
         Commands::What => {
             let detected = Detector::detect()?;
-            let project = detected.project()?;
-            println!("{project}");
+            // let project = detected.project()?;
+            // println!("{project:#?}");
             
             let reason = detected.why()?;
-            println!("{reason}");
+            println!("{reason:#?}");
             // println!("What is not developed yet!")
         },
         Commands::Write { content, path } => {

@@ -70,8 +70,8 @@ impl Policy {
          * timeout_s to that
          */
         match timeout_s {
-            Some(millis) => {
-                self.timeout_s = Duration::from_millis(millis);
+            Some(secs) => {
+                self.timeout_s = Duration::from_secs(secs);
                 return Ok(self)
             },
             None => {

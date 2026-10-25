@@ -28,7 +28,7 @@ fn take_input() -> Result<String> {
         .read_line(&mut input)
         .expect("Couldn't read your input!");
 
-    Ok(input)
+    Ok(input.to_ascii_lowercase())
 }
 
 impl Detector {
@@ -36,9 +36,6 @@ impl Detector {
         let entries: Vec<std::result::Result<fs::DirEntry, std::io::Error>> = 
             fs::read_dir(env::current_dir()?)?.collect();
         
-        let count = entries.len();
-
-        let mut iterator = 1;
         for path in entries {
             let entry = path?;
             let filename = entry.file_name();
@@ -89,6 +86,16 @@ impl Detector {
                         eprintln!("Javascript/Typescript tools expect exactly 'package.json'\n");
                         eprintln!("You are advised to rename them correctly\n");
 
+
+                        match take_input()?.trim() {
+                            "y" | "yes" => {
+                                if filename.eq_ignore_ascii_case("package.json") {
+                                    fs::rename(&filename, "package.json")?
+                                }
+                            },
+                            "n" | "no" => {},
+                            _ => eprintln!("Invalid input!")
+                        }
                     }
                 }
                 
@@ -98,11 +105,6 @@ impl Detector {
                         reason: format!("Cuz of {filename:#?}")
                     }
                 )
-            } else {
-                if iterator < count {
-                    iterator += 1;
-                    continue
-                } 
             }
         }
         

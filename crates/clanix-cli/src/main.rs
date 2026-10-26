@@ -253,7 +253,7 @@ fn main() -> Result<(), Error> {
             // Detect the project
             detector.detect()?;
             
-            let reason = detector.why()?;
+            let reason = detector.why();
             println!("{reason}");
             // println!("What is not developed yet!")
         },

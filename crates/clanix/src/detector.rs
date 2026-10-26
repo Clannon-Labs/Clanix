@@ -169,9 +169,10 @@ impl Detector {
         // scan fresh
         self.project.clear();
         self.repository.clear();
-        
+
+        // Do not follow symbolic links outside the directory being scanned
         let walker = WalkDir::new(Path::new("."))
-            .follow_links(true)
+            .follow_links(false)
             .into_iter()
             .filter_entry(|e| !should_exclude(e));
 
@@ -313,18 +314,18 @@ impl Detector {
         Ok(())
     }
     
-    pub fn project(&self) -> Result<Box<[&Project]>> {
+    pub fn project(&self) -> Box<[&Project]> {
         let mut project = Vec::new();
 
         for key in self.project.keys() {
             project.push(key)
         }
 
-        Ok(project.into_boxed_slice())
+        project.into_boxed_slice()
     }
     
-    pub fn why(&self) -> Result<&Self> {
-        Ok(&self)
+    pub fn why(&self) -> &Self {
+        &self
     }
 }
 
@@ -352,9 +353,9 @@ fn format_reason(reason: &Reason, f: &mut std::fmt::Formatter<'_>) -> std::fmt::
     writeln!(f, "   Confidence: {}", reason.confidence)?;
 
     if !reason.evidence.is_empty(){
-        writeln!(f, "   File: ")?;
+        writeln!(f, "   Evidence: ")?;
+        
         for evidence in &reason.evidence {
-
             if let Some(expl) = &evidence.text {
                 writeln!(f,
                     "     - {}    > {expl}",

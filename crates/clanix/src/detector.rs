@@ -20,6 +20,13 @@ pub enum Project {
     Unknown,
 }
 
+#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Repository {
+    Git,
+    Unknown,
+}
+
 #[derive(Debug)]
 pub struct Detector {
     // PathBuf is the file cuz of which the project was detected
@@ -68,7 +75,7 @@ impl Detector {
         Ok(reason.to_path_buf())
     }
     
-    /// This just scans for the current directory 
+    /// This scans the current directory and its children
     pub fn detect(&mut self) -> Result<()> {
         let walker = WalkDir::new(Path::new("."))
             .follow_links(true)
@@ -189,3 +196,28 @@ impl std::fmt::Display for Project {
     }
 }
 
+impl std::fmt::Display for Repository {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Git => write!(f, "Git"),
+            _ => write!(f, "Unknown")
+        }
+    }
+}
+
+impl std::fmt::Display for Detector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "\n====Detection Report====")?;
+
+        for (project, reasons) in &self.detected {
+            writeln!(f, "\nProject: {project}")?;
+            writeln!(f, "Reasons:")?;
+
+            for reason in reasons {
+                writeln!(f, " - {}", reason.display())?;
+            }
+        }
+
+        writeln!(f, "\n========================")
+    }
+}

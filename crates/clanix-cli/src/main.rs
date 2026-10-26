@@ -254,7 +254,7 @@ fn main() -> Result<(), Error> {
             detector.detect()?;
             
             let reason = detector.why()?;
-            println!("{reason:#?}");
+            println!("{reason}");
             // println!("What is not developed yet!")
         },
         Commands::Write { content, path } => {

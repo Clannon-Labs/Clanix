@@ -27,12 +27,25 @@ pub enum Repository {
     Unknown,
 }
 
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
+struct Reason {
+    // PathBuf is the file cuz of which the project/repository was detected
+    // to be what was reported
+    // 
+    confidence: u64,
+    evidence: Vec<Evidence>,
+}
+
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
+struct Evidence {
+    file: PathBuf,
+    text: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct Detector {
-    // PathBuf is the file cuz of which the project was detected
-    // to be what was reported
-    project: HashMap<Project, Vec<PathBuf>>,
-    repository: HashMap<Repository, Vec<PathBuf>>,
+    project: HashMap<Project, Reason>,
+    repository: HashMap<Repository, Reason>,
 }
 
 fn take_input() -> Result<String> {
@@ -42,23 +55,66 @@ fn take_input() -> Result<String> {
     io::stdout().flush()?;
 
     io::stdin()
-        .read_line(&mut input)
-        .expect("Couldn't read your input!");
+        .read_line(&mut input)?;
 
     Ok(input.to_ascii_lowercase())
 }
 
-fn is_hidden(entry: &DirEntry) -> bool {
-    let name = entry.file_name();
+fn should_exclude(entry: &DirEntry) -> bool {
+    // if name == OsStr::new(".") || name == OsStr::new("..") {
+    //     return false;
+    // }
 
-    if name == OsStr::new(".") || name == OsStr::new("..") {
+    // .git written in any case is not excluded!
+    let is_git = entry
+        .file_name()
+        .to_str()
+        .is_some_and(|name| name.eq_ignore_ascii_case(".git"));
+    
+    if is_git {
         return false;
     }
 
-    Path::new(name)
-        .as_os_str()
-        .as_encoded_bytes()
-        .starts_with(b".")
+    // To prevent going inside the git directory
+    let is_inside_git = entry
+        .path()
+        .ancestors()
+        .skip(1)
+        .any(|ancestor| {
+            ancestor
+                .file_name()
+                .and_then(OsStr::to_str)
+                .is_some_and(|name| name.eq_ignore_ascii_case(".git"))
+        });
+
+    if is_inside_git {
+        return true;
+    }
+    
+    if matches!(entry.file_name().to_str(),
+        Some(".") | // current/root directory, so shouldn't be excluded
+        Some("..") // Paren directory
+    ) {
+        return false;
+    }
+
+    entry
+        .file_name()
+        .to_str()
+        .is_some_and(|name| name.starts_with('.'))
+}
+
+impl Reason {
+    fn new() -> Self {
+        Self {
+            confidence: 0,
+            evidence: Vec::new(),
+        }
+    }
+
+    fn is_default(&self) -> bool {
+        Self::new() == *self
+    }
 }
 
 impl Detector {
@@ -71,21 +127,44 @@ impl Detector {
 
     /// Get the project, if the values ar already present, append to them,
     /// if it's empty, create a new vector and push the value
-    fn insert_project(&mut self, project: Project, reason: &Path) -> Result<PathBuf> {
-        self.project.entry(project)
-            .or_insert_with(Vec::new)
-            .push(reason.to_path_buf());
+    fn insert_project(
+        &mut self,
+        project: Project,
+        path: &Path,
+        text: Option<String>
+    ) {
 
-        Ok(reason.to_path_buf())
+        let reason = self.project
+            .entry(project)
+            // This gives a &mut Reason
+            .or_insert_with(Reason::new);
+        
+        reason.confidence += 1;
+        reason.evidence.push(Evidence {
+            file: path.to_path_buf(),
+            text,
+        })
     }
 
     /// Same for repository
-    fn insert_repository(&mut self, repo: Repository, reason: &Path) -> Result<PathBuf> {
-        self.repository.entry(repo)
-            .or_insert_with(Vec::new)
-            .push(reason.to_path_buf());
+    fn insert_repository(
+        &mut self, 
+        repo: Repository, 
+        path: &Path,
+        text: Option<String>,
+    ) {
+        
+        let reason = self.repository
+            .entry(repo)
+            .or_insert_with(Reason::new);
 
-        Ok(reason.to_path_buf())
+        reason.confidence +=1;
+        reason.evidence.push(
+            Evidence {
+                file: path.to_path_buf(),
+                text
+            }
+        )
     }
     
     /// This scans the current directory and its children
@@ -93,7 +172,7 @@ impl Detector {
         let walker = WalkDir::new(Path::new("."))
             .follow_links(true)
             .into_iter()
-            .filter_entry(|e| !is_hidden(e));
+            .filter_entry(|e| !should_exclude(e));
 
         for entry in walker {
             match entry {
@@ -110,9 +189,11 @@ impl Detector {
                         if filename.eq_ignore_ascii_case("cargo.toml")
                             || filename.eq_ignore_ascii_case("cargo.lock") {
 
+                                let explanation = String::from("Cargo file");
+                                
                                 match filename.to_str() {
                                     Some(fname) if matches!(fname, "Cargo.toml" | "Cargo.lock") => {
-                                        self.insert_project(Project::Rust, path)?;
+                                        self.insert_project(Project::Rust, path, Some(explanation));
                                     },
                                     _ => {
                                         eprintln!("\nWARNING: Non standard filename found {}!", path.display());
@@ -126,22 +207,24 @@ impl Detector {
                                         match take_input()?.trim() {
                                             "y" | "yes" => {
                                                 if filename.eq_ignore_ascii_case("cargo.toml") {
-                                                    fs::rename(
-                                                        path,
-                                                        self.insert_project(Project::Rust, &path.with_file_name("Cargo.toml"))?
-                                                    )?;
+                                                    let destination = path.with_file_name("Cargo.toml");
+                                                    fs::rename(path, &destination)?;
+
+                                                    self.insert_project(Project::Rust, &destination, Some(explanation));
+                                                    
                                                 } else if filename.eq_ignore_ascii_case("cargo.lock") {
-                                                    fs::rename(
-                                                        path,
-                                                        self.insert_project(Project::Rust, &path.with_file_name("Cargo.lock"))?
-                                                    )?;
+                                                    let destination = path.with_file_name("Cargo.lock");
+                                                    fs::rename(path, &destination)?;
+
+                                                    self.insert_project(Project::Rust, &destination, Some(explanation));
+                                                    
                                                 }
                                             },
                                             _ => {
                                                 if filename.eq_ignore_ascii_case("cargo.toml") {
-                                                    self.insert_project(Project::Rust, path)?;
+                                                    self.insert_project(Project::Rust, path, Some(explanation));
                                                 } else if filename.eq_ignore_ascii_case("cargo.lock") {
-                                                    self.insert_project(Project::Rust, path)?;
+                                                    self.insert_project(Project::Rust, path, Some(explanation));
                                                 }
                                             },
                                         }
@@ -150,9 +233,11 @@ impl Detector {
                                 }
                         } else if filename.eq_ignore_ascii_case("package.json") {
 
+                            let explanation = String::from("Typescript file");
+                            
                             match filename.to_str() {
                                 Some("package.json") => {
-                                    self.insert_project(Project::Javascript, path)?;
+                                    self.insert_project(Project::Javascript, path, Some(explanation));
                                 },
                                 _ => {
                                     eprintln!("\nWARNING: Non standard filename found {}!", path.display());
@@ -160,13 +245,13 @@ impl Detector {
 
                                     match take_input()?.trim() {
                                         "y" | "yes" => {
-                                            fs::rename(
-                                                path,
-                                                self.insert_project(Project::Javascript, &path.with_file_name("package.json"))?
-                                            )?;
+                                            let destination = path.with_file_name("package.json");
+                                            fs::rename(path, &destination)?;
+                                            self.insert_project(Project::Javascript, &destination, Some(explanation));
+                                            
                                         },
                                         _ => {
-                                            self.insert_project(Project::Javascript, &path)?;
+                                            self.insert_project(Project::Javascript, &path, Some(explanation));
                                         }
                                     }
                                 }
@@ -187,9 +272,11 @@ impl Detector {
                         };
 
                         if dir_name.eq_ignore_ascii_case(".git") {
+                            let explanation = String::from("git directory");
+                                
                             match dir_name.to_str() {
                                 Some(".git") => {
-                                    self.insert_repository(Repository::Git, path)?;
+                                    self.insert_repository(Repository::Git, path, Some(explanation));
                                 },
                                 _ => {
                                     eprintln!("\nWARNING: Non standard directory found {}!", path.display());
@@ -197,13 +284,13 @@ impl Detector {
 
                                     match take_input()?.trim() {
                                         "y" | "yes" => {
-                                            fs::rename(
-                                                path,
-                                               self.insert_repository(Repository::Git, &path.with_file_name(".git"))? 
-                                            )?;
+                                            let destination = path.with_file_name(".git");
+                                            fs::rename(path, &destination)?;
+                                            self.insert_repository(Repository::Git, &destination, Some(explanation));
+                                            
                                         },
                                         _ => {
-                                            self.insert_repository(Repository::Git, path)?;
+                                            self.insert_repository(Repository::Git, path, Some(explanation));
                                         }
                                     }
 
@@ -259,16 +346,73 @@ impl std::fmt::Display for Repository {
 impl std::fmt::Display for Detector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\n====Detection Report====")?;
+        
+        if self.repository.is_empty() && self.project.is_empty() {
+            writeln!(f, "\nReport not ready yet!")?;
+            
+        } 
 
-        for (project, reasons) in &self.project {
-            writeln!(f, "\nProject: {project}")?;
-            writeln!(f, "Reasons:")?;
+        
+        if !self.repository.is_empty() {
+            for (repository, reason) in &self.repository {
+                writeln!(f, "\n------------------------")?;
+                writeln!(f, "Repository: {repository}")?;
+                writeln!(f, "Reason: ")?;
 
-            for reason in reasons {
-                writeln!(f, " - {}", reason.display())?;
+                if reason.is_default() {
+                    writeln!(f, "> There is no reason available!")?;
+                } else {
+                    writeln!(f, "   Confidence: {}", reason.confidence)?;
+
+                    if !reason.evidence.is_empty(){
+                        writeln!(f, "   File: ")?;
+                        for evidence in &reason.evidence {
+    
+                            if let Some(expl) = &evidence.text {
+                                writeln!(f,
+                                    "     - {}    > {expl}",
+                                    evidence.file.display()
+                                )?;
+                            } else {
+                                writeln!(f, "     - {}", evidence.file.display())?;
+                            }
+                        }
+                    }
+                }
+
+                writeln!(f, "------------------------\n")?;
             }
         }
+        
+        if !self.project.is_empty() {
+            for (project, reason) in &self.project {
+                writeln!(f, "\n------------------------")?;
+                writeln!(f, "Project: {project}")?;
+                writeln!(f, "Reason:")?;
 
+                if reason.is_default() {
+                    writeln!(f, "> There is no reason available!")?;
+                } else {
+                    writeln!(f, "   Confidence: {}", reason.confidence)?;
+
+                    if !reason.evidence.is_empty(){
+                        writeln!(f, "   File: ")?;
+                        for evidence in &reason.evidence {
+                            if let Some(expl) = &evidence.text {
+                                writeln!(f,
+                                    "     - {}    > {expl}",
+                                    evidence.file.display()
+                                )?;
+                            } else {
+                                writeln!(f, "     - {}", evidence.file.display())?;
+                            }
+                        }
+                    }
+                }
+                writeln!(f, "------------------------\n")?;
+            }
+        } 
+        
         writeln!(f, "\n========================")
     }
 }

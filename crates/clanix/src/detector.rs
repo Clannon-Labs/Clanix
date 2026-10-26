@@ -1,8 +1,15 @@
 
-use std::{env, fs, io::{self, Write}};
+use std::{
+    ffi::{OsStr,},
+    fs,
+    io::{self, Write},
+    path::{Path, PathBuf,}
+};
 use std::collections::HashMap;
 
-use crate::Result;
+use walkdir::{DirEntry, WalkDir};
+
+use crate::{Error, Result};
 
 #[derive(Debug, Hash, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -15,14 +22,15 @@ pub enum Project {
 
 #[derive(Debug)]
 pub struct Detector {
-    // String is the reason cuz of which the project was detected
-    detected: HashMap<Project, Vec<String>>,
+    // PathBuf is the file cuz of which the project was detected
+    // to be what was reported
+    detected: HashMap<Project, Vec<PathBuf>>,
 }
 
 fn take_input() -> Result<String> {
     let mut input = String::new();
     
-    print!("Do you want it/them renamed properly? [y/N]: ");
+    print!(">> Do you want it renamed properly? [y/N]: ");
     io::stdout().flush()?;
 
     io::stdin()
@@ -32,107 +40,127 @@ fn take_input() -> Result<String> {
     Ok(input.to_ascii_lowercase())
 }
 
+fn is_hidden(entry: &DirEntry) -> bool {
+    let name = entry.file_name();
+
+    if name == OsStr::new(".") || name == OsStr::new("..") {
+        return false;
+    }
+
+    Path::new(name)
+        .as_os_str()
+        .as_encoded_bytes()
+        .starts_with(b".")
+}
+
 impl Detector {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             detected: HashMap::new()
         }
     }
 
-    fn insert(&mut self, project: Project, reason: &str) -> Result<String> {
+    fn insert(&mut self, project: Project, reason: &Path) -> Result<PathBuf> {
         self.detected.entry(project)
             .or_insert_with(Vec::new)
-            .push(reason.to_string());
+            .push(reason.to_path_buf());
 
-        Ok(reason.to_string())
+        Ok(reason.to_path_buf())
     }
+    
+    /// This just scans for the current directory 
+    pub fn detect(&mut self) -> Result<()> {
+        let walker = WalkDir::new(Path::new("."))
+            .follow_links(true)
+            .into_iter()
+            .filter_entry(|e| !is_hidden(e));
 
-    pub fn detect() -> Result<Self> {
-        let entries: Vec<std::result::Result<fs::DirEntry, std::io::Error>> = 
-            fs::read_dir(env::current_dir()?)?.collect();
+        for entry in walker {
+            match entry {
+                Ok(dir_entry) => {
+                    let path = dir_entry.path();
+                    
+                    if dir_entry.file_type().is_file() {
+                        let Some(filename) = path.file_name() else {
+                            return Err(
+                                Error::InvalidFilename
+                            )
+                        };
 
-        let mut detected = Self::new();
-        
-        for path in entries {
-            let entry = path?;
-            let filename = entry.file_name();
-            
-            if filename.eq_ignore_ascii_case("cargo.toml") || 
-            filename.eq_ignore_ascii_case("cargo.lock") {
+                        if filename.eq_ignore_ascii_case("cargo.toml")
+                            || filename.eq_ignore_ascii_case("cargo.lock") {
 
-                match filename.to_str() {
-                    Some(fname) if matches!(fname, "Cargo.toml" | "Cargo.lock") => {
-                        detected.insert(Project::Rust, &fname)?;
-                        
-                    },
-                    _ => {
-                        eprintln!("\nWarning: Non-standard filename found ({:?}).\n",filename);
-                        eprintln!("Rust tools expect exactly 'Cargo.toml' or 'Cargo.lock'\n");
-                        eprintln!("You are advised to rename them correctly\n");
+                                match filename.to_str() {
+                                    Some(fname) if matches!(fname, "Cargo.toml" | "Cargo.lock") => {
+                                        self.insert(Project::Rust, path)?;
+                                    },
+                                    _ => {
+                                        eprintln!("\nWARNING: Non standard filename found {}!", path.display());
+                                        
+                                        if filename.eq_ignore_ascii_case("cargo.toml") {
+                                            eprintln!("Rust tools often expect exactly 'Cargo.toml' !\n");
+                                        } else if filename.eq_ignore_ascii_case("cargo.lock") {
+                                            eprintln!("Rust tools often expect exactly 'Cargo.lock' !\n");
+                                        }
 
-                        
-                        match take_input()?.trim() {
-                            "y" | "yes" => {
-                                // If we reached this point, we are sure that the filenames
-                                // are not the standard ones, so we can say for sure that 
-                                // 
-                                // we are not wasting our time trying to rename the file that's
-                                // already in the standard form
-                                if filename.eq_ignore_ascii_case("cargo.toml") {
-                                    // The reason for putting detected.insert() inside rename
-                                    // is to not accidently insert a different filename and rename
-                                    // a different filename
-                                    fs::rename(&filename, 
-                                        detected.insert(Project::Rust, "Cargo.toml")?
-                                    )?;
-                                    
-                                } else if filename.eq_ignore_ascii_case("cargo.lock") {
-                                    fs::rename(&filename, 
-                                        detected.insert(Project::Rust, "Cargo.lock")?
-                                    )?;
+                                        match take_input()?.trim() {
+                                            "y" | "yes" => {
+                                                if filename.eq_ignore_ascii_case("cargo.toml") {
+                                                    fs::rename(
+                                                        path,
+                                                        self.insert(Project::Rust, &path.with_file_name("Cargo.toml"))?
+                                                    )?;
+                                                } else if filename.eq_ignore_ascii_case("cargo.lock") {
+                                                    fs::rename(
+                                                        path,
+                                                        self.insert(Project::Rust, &path.with_file_name("Cargo.lock"))?
+                                                    )?;
+                                                }
+                                            },
+                                            _ => {
+                                                if filename.eq_ignore_ascii_case("cargo.toml") {
+                                                    self.insert(Project::Rust, path)?;
+                                                } else if filename.eq_ignore_ascii_case("cargo.lock") {
+                                                    self.insert(Project::Rust, path)?;
+                                                }
+                                            },
+                                        }
+
+                                    }
                                 }
-                            },
-                            "n" | "no" => {
-                                detected.insert(Project::Rust, &filename.to_string_lossy())?;
-                            },
-                            _ => eprintln!("Invalid input!")
-                        }
-                        
-                    }
-                }
-                                
-            } else if filename.eq_ignore_ascii_case("package.json") {
+                        } else if filename.eq_ignore_ascii_case("package.json") {
 
-                match filename.to_str() {
-                    Some(fname) if matches!(fname, "package.json") => {
-                        detected.insert(Project::Javascript, fname)?;
-                    },
-                    _ => {
-                        eprintln!("\nWarning: Non-standard filename found ({:?}).\n",filename);
-                        eprintln!("Javascript/Typescript tools expect exactly 'package.json'\n");
-                        eprintln!("You are advised to rename them correctly\n");
+                            match filename.to_str() {
+                                Some("package.json") => {
+                                    self.insert(Project::Javascript, path)?;
+                                },
+                                _ => {
+                                    eprintln!("\nWARNING: Non standard filename found {}!", path.display());
+                                    eprintln!("JS/TS tools often expect exactly 'package.json' !\n");
 
-
-                        match take_input()?.trim() {
-                            "y" | "yes" => {
-                                if filename.eq_ignore_ascii_case("package.json") {
-                                    fs::rename(&filename, 
-                                        detected.insert(Project::Javascript, "package.json")?
-                                    )?;
+                                    match take_input()?.trim() {
+                                        "y" | "yes" => {
+                                            fs::rename(
+                                                path,
+                                                self.insert(Project::Javascript, &path.with_file_name("package.json"))?
+                                            )?;
+                                        },
+                                        _ => {
+                                            self.insert(Project::Javascript, &path)?;
+                                        }
+                                    }
                                 }
-                            },
-                            "n" | "no" => {
-                                detected.insert(Project::Javascript, &filename.to_string_lossy())?;
-                            },
-                            _ => eprintln!("Invalid input!")
+                            }
                         }
                     }
-                }
+                },
+                Err(e) => return Err(
+                    Error::WalkError(e)
+                )
             }
         }
-        
-        Ok(detected)
-        
+
+        Ok(())
     }
     
     pub fn project(&self) -> Result<Box<[&Project]>> {

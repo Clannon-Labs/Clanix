@@ -248,11 +248,12 @@ fn main() -> Result<(), Error> {
             println!("Init is not developed yet!")
         },
         Commands::What => {
-            let detected = Detector::detect()?;
-            // let project = detected.project()?;
-            // println!("{project:#?}");
+            // Give an instance of the detector
+            let mut detector = Detector::new();
+            // Detect the project
+            detector.detect()?;
             
-            let reason = detected.why()?;
+            let reason = detector.why()?;
             println!("{reason:#?}");
             // println!("What is not developed yet!")
         },

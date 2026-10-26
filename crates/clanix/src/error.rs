@@ -14,6 +14,12 @@ pub enum Error {
 
     #[error("Project detection failed")]
     Detect(#[from] std::io::Error),
+
+    #[error("Failed to walk the directories")]
+    WalkError(#[from] walkdir::Error),
+
+    #[error("Invalid filename")]
+    InvalidFilename,
     
     // to convert policy error back to request error
     #[error("Invalid execution policy")]

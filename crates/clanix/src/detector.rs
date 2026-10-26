@@ -31,7 +31,8 @@ pub enum Repository {
 pub struct Detector {
     // PathBuf is the file cuz of which the project was detected
     // to be what was reported
-    detected: HashMap<Project, Vec<PathBuf>>,
+    project: HashMap<Project, Vec<PathBuf>>,
+    repository: HashMap<Repository, Vec<PathBuf>>,
 }
 
 fn take_input() -> Result<String> {
@@ -63,12 +64,24 @@ fn is_hidden(entry: &DirEntry) -> bool {
 impl Detector {
     pub fn new() -> Self {
         Self {
-            detected: HashMap::new()
+            project: HashMap::new(),
+            repository: HashMap::new()
         }
     }
 
-    fn insert(&mut self, project: Project, reason: &Path) -> Result<PathBuf> {
-        self.detected.entry(project)
+    /// Get the project, if the values ar already present, append to them,
+    /// if it's empty, create a new vector and push the value
+    fn insert_project(&mut self, project: Project, reason: &Path) -> Result<PathBuf> {
+        self.project.entry(project)
+            .or_insert_with(Vec::new)
+            .push(reason.to_path_buf());
+
+        Ok(reason.to_path_buf())
+    }
+
+    /// Same for repository
+    fn insert_repository(&mut self, repo: Repository, reason: &Path) -> Result<PathBuf> {
+        self.repository.entry(repo)
             .or_insert_with(Vec::new)
             .push(reason.to_path_buf());
 
@@ -90,7 +103,7 @@ impl Detector {
                     if dir_entry.file_type().is_file() {
                         let Some(filename) = path.file_name() else {
                             return Err(
-                                Error::InvalidFilename
+                                Error::InvalidFilename(path.to_path_buf())
                             )
                         };
 
@@ -99,7 +112,7 @@ impl Detector {
 
                                 match filename.to_str() {
                                     Some(fname) if matches!(fname, "Cargo.toml" | "Cargo.lock") => {
-                                        self.insert(Project::Rust, path)?;
+                                        self.insert_project(Project::Rust, path)?;
                                     },
                                     _ => {
                                         eprintln!("\nWARNING: Non standard filename found {}!", path.display());
@@ -115,20 +128,20 @@ impl Detector {
                                                 if filename.eq_ignore_ascii_case("cargo.toml") {
                                                     fs::rename(
                                                         path,
-                                                        self.insert(Project::Rust, &path.with_file_name("Cargo.toml"))?
+                                                        self.insert_project(Project::Rust, &path.with_file_name("Cargo.toml"))?
                                                     )?;
                                                 } else if filename.eq_ignore_ascii_case("cargo.lock") {
                                                     fs::rename(
                                                         path,
-                                                        self.insert(Project::Rust, &path.with_file_name("Cargo.lock"))?
+                                                        self.insert_project(Project::Rust, &path.with_file_name("Cargo.lock"))?
                                                     )?;
                                                 }
                                             },
                                             _ => {
                                                 if filename.eq_ignore_ascii_case("cargo.toml") {
-                                                    self.insert(Project::Rust, path)?;
+                                                    self.insert_project(Project::Rust, path)?;
                                                 } else if filename.eq_ignore_ascii_case("cargo.lock") {
-                                                    self.insert(Project::Rust, path)?;
+                                                    self.insert_project(Project::Rust, path)?;
                                                 }
                                             },
                                         }
@@ -139,7 +152,7 @@ impl Detector {
 
                             match filename.to_str() {
                                 Some("package.json") => {
-                                    self.insert(Project::Javascript, path)?;
+                                    self.insert_project(Project::Javascript, path)?;
                                 },
                                 _ => {
                                     eprintln!("\nWARNING: Non standard filename found {}!", path.display());
@@ -149,13 +162,51 @@ impl Detector {
                                         "y" | "yes" => {
                                             fs::rename(
                                                 path,
-                                                self.insert(Project::Javascript, &path.with_file_name("package.json"))?
+                                                self.insert_project(Project::Javascript, &path.with_file_name("package.json"))?
                                             )?;
                                         },
                                         _ => {
-                                            self.insert(Project::Javascript, &path)?;
+                                            self.insert_project(Project::Javascript, &path)?;
                                         }
                                     }
+                                }
+                            }
+                        }
+                    } else if dir_entry.file_type().is_dir() {
+                        let dir_name = match path.file_name() {
+                          Some(name) => name,
+                          None => {
+                              if path == Path::new(".") {
+                                  OsStr::new(".")
+                              } else {
+                                  return Err(
+                                      Error::InvalidDirectoryName(path.to_path_buf())
+                                  )
+                              }
+                          }  
+                        };
+
+                        if dir_name.eq_ignore_ascii_case(".git") {
+                            match dir_name.to_str() {
+                                Some(".git") => {
+                                    self.insert_repository(Repository::Git, path)?;
+                                },
+                                _ => {
+                                    eprintln!("\nWARNING: Non standard directory found {}!", path.display());
+                                    eprintln!("Other tools expect exactly '.git' !\n");
+
+                                    match take_input()?.trim() {
+                                        "y" | "yes" => {
+                                            fs::rename(
+                                                path,
+                                               self.insert_repository(Repository::Git, &path.with_file_name(".git"))? 
+                                            )?;
+                                        },
+                                        _ => {
+                                            self.insert_repository(Repository::Git, path)?;
+                                        }
+                                    }
+
                                 }
                             }
                         }
@@ -173,7 +224,7 @@ impl Detector {
     pub fn project(&self) -> Result<Box<[&Project]>> {
         let mut project = Vec::new();
 
-        for key in self.detected.keys() {
+        for key in self.project.keys() {
             project.push(key)
         }
 
@@ -209,7 +260,7 @@ impl std::fmt::Display for Detector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\n====Detection Report====")?;
 
-        for (project, reasons) in &self.detected {
+        for (project, reasons) in &self.project {
             writeln!(f, "\nProject: {project}")?;
             writeln!(f, "Reasons:")?;
 

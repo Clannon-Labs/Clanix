@@ -1,4 +1,6 @@
 
+use std::path::PathBuf;
+
 use thiserror::Error as ThisError;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -18,8 +20,11 @@ pub enum Error {
     #[error("Failed to walk the directories")]
     WalkError(#[from] walkdir::Error),
 
-    #[error("Invalid filename")]
-    InvalidFilename,
+    #[error("Invalid filename {0}")]
+    InvalidFilename(PathBuf),
+
+    #[error("Invalid directory name {0}")]
+    InvalidDirectoryName(PathBuf),
     
     // to convert policy error back to request error
     #[error("Invalid execution policy")]

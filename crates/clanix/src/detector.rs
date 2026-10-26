@@ -165,6 +165,11 @@ impl Detector {
     
     /// This scans the current directory and its children
     pub fn detect(&mut self) -> Result<()> {
+        // If called twice, it will clear out the old report and
+        // scan fresh
+        self.project.clear();
+        self.repository.clear();
+        
         let walker = WalkDir::new(Path::new("."))
             .follow_links(true)
             .into_iter()
@@ -343,6 +348,27 @@ impl std::fmt::Display for Repository {
     }
 }
 
+fn format_reason(reason: &Reason, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            writeln!(f, "   Confidence: {}", reason.confidence)?;
+
+            if !reason.evidence.is_empty(){
+                writeln!(f, "   File: ")?;
+                for evidence in &reason.evidence {
+
+                    if let Some(expl) = &evidence.text {
+                        writeln!(f,
+                            "     - {}    > {expl}",
+                            evidence.file.display()
+                        )?;
+                    } else {
+                        writeln!(f, "     - {}", evidence.file.display())?;
+                    }
+                }
+            }
+
+            Ok(())
+        }
+
 impl std::fmt::Display for Detector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\n====Detection Report====")?;
@@ -361,20 +387,7 @@ impl std::fmt::Display for Detector {
 
                 writeln!(f, "   Confidence: {}", reason.confidence)?;
 
-                if !reason.evidence.is_empty(){
-                    writeln!(f, "   File: ")?;
-                    for evidence in &reason.evidence {
-
-                        if let Some(expl) = &evidence.text {
-                            writeln!(f,
-                                "     - {}    > {expl}",
-                                evidence.file.display()
-                            )?;
-                        } else {
-                            writeln!(f, "     - {}", evidence.file.display())?;
-                        }
-                    }
-                }
+                format_reason(reason, f)?;
 
                 writeln!(f, "------------------------\n")?;
             }
@@ -388,19 +401,7 @@ impl std::fmt::Display for Detector {
 
                 writeln!(f, "   Confidence: {}", reason.confidence)?;
 
-                if !reason.evidence.is_empty(){
-                    writeln!(f, "   File: ")?;
-                    for evidence in &reason.evidence {
-                        if let Some(expl) = &evidence.text {
-                            writeln!(f,
-                                "     - {}    > {expl}",
-                                evidence.file.display()
-                            )?;
-                        } else {
-                            writeln!(f, "     - {}", evidence.file.display())?;
-                        }
-                    }
-                }
+                format_reason(reason, f)?;
                 
                 writeln!(f, "------------------------\n")?;
             }

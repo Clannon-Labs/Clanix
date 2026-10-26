@@ -1,6 +1,7 @@
 > What I am thinking of building towards for Clanix.
 
 1. Project discovery:
+> Just started; not done yet
 
   To make `Clanix` able to detect what type of project is the user right now
   Clanix could look for directories or files, like:
@@ -10,6 +11,7 @@
   .git/: git repository etc
 
 2. A proper Clanix project manifest:
+> Planning to start it now
 
  Clanix having a configuration file (maybe clanix.toml?) which will
  define the project identity and version

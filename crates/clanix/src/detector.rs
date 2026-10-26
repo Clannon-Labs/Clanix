@@ -16,7 +16,7 @@ pub enum Project {
 #[derive(Debug)]
 pub struct Detector {
     // String is the reason cuz of which the project was detected
-    detected: HashMap<Project, Box<[String]>>,
+    detected: HashMap<Project, Vec<String>>,
 }
 
 fn take_input() -> Result<String> {
@@ -40,13 +40,9 @@ impl Detector {
     }
 
     fn insert(&mut self, project: Project, reason: &str) -> Result<String> {
-        if let Some(prj) = self.detected.get(&project).cloned() {
-            prj.to_vec().push(reason.to_string());
-        } else {
-            let mut reason_vec = Vec::new();
-            reason_vec.push(reason.to_string());
-            self.detected.insert(project, reason_vec.into_boxed_slice());
-        }
+        self.detected.entry(project)
+            .or_insert_with(Vec::new)
+            .push(reason.to_string());
 
         Ok(reason.to_string())
     }
@@ -149,8 +145,8 @@ impl Detector {
         Ok(project.into_boxed_slice())
     }
     
-    pub fn why(&self) -> Result<&HashMap<Project, Box<[String]>>> {
-        Ok(&self.detected)
+    pub fn why(&self) -> Result<&Self> {
+        Ok(&self)
     }
 }
 

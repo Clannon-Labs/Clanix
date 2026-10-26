@@ -111,10 +111,6 @@ impl Reason {
             evidence: Vec::new(),
         }
     }
-
-    fn is_default(&self) -> bool {
-        Self::new() == *self
-    }
 }
 
 impl Detector {
@@ -189,7 +185,11 @@ impl Detector {
                         if filename.eq_ignore_ascii_case("cargo.toml")
                             || filename.eq_ignore_ascii_case("cargo.lock") {
 
-                                let explanation = String::from("Cargo file");
+                                let explanation = match filename.to_str() {
+                                    Some("Cargo.toml") => "Rust package manifest",
+                                    Some("Cargo.lock") => "Rust dependency lockfile",
+                                    _ => "Rust project file"
+                                }.to_owned();
                                 
                                 match filename.to_str() {
                                     Some(fname) if matches!(fname, "Cargo.toml" | "Cargo.lock") => {
@@ -233,7 +233,7 @@ impl Detector {
                                 }
                         } else if filename.eq_ignore_ascii_case("package.json") {
 
-                            let explanation = String::from("Typescript file");
+                            let explanation = String::from("JavaScript/TypeScript package manifest");
                             
                             match filename.to_str() {
                                 Some("package.json") => {
@@ -359,23 +359,19 @@ impl std::fmt::Display for Detector {
                 writeln!(f, "Repository: {repository}")?;
                 writeln!(f, "Reason: ")?;
 
-                if reason.is_default() {
-                    writeln!(f, "> There is no reason available!")?;
-                } else {
-                    writeln!(f, "   Confidence: {}", reason.confidence)?;
+                writeln!(f, "   Confidence: {}", reason.confidence)?;
 
-                    if !reason.evidence.is_empty(){
-                        writeln!(f, "   File: ")?;
-                        for evidence in &reason.evidence {
-    
-                            if let Some(expl) = &evidence.text {
-                                writeln!(f,
-                                    "     - {}    > {expl}",
-                                    evidence.file.display()
-                                )?;
-                            } else {
-                                writeln!(f, "     - {}", evidence.file.display())?;
-                            }
+                if !reason.evidence.is_empty(){
+                    writeln!(f, "   File: ")?;
+                    for evidence in &reason.evidence {
+
+                        if let Some(expl) = &evidence.text {
+                            writeln!(f,
+                                "     - {}    > {expl}",
+                                evidence.file.display()
+                            )?;
+                        } else {
+                            writeln!(f, "     - {}", evidence.file.display())?;
                         }
                     }
                 }
@@ -390,25 +386,22 @@ impl std::fmt::Display for Detector {
                 writeln!(f, "Project: {project}")?;
                 writeln!(f, "Reason:")?;
 
-                if reason.is_default() {
-                    writeln!(f, "> There is no reason available!")?;
-                } else {
-                    writeln!(f, "   Confidence: {}", reason.confidence)?;
+                writeln!(f, "   Confidence: {}", reason.confidence)?;
 
-                    if !reason.evidence.is_empty(){
-                        writeln!(f, "   File: ")?;
-                        for evidence in &reason.evidence {
-                            if let Some(expl) = &evidence.text {
-                                writeln!(f,
-                                    "     - {}    > {expl}",
-                                    evidence.file.display()
-                                )?;
-                            } else {
-                                writeln!(f, "     - {}", evidence.file.display())?;
-                            }
+                if !reason.evidence.is_empty(){
+                    writeln!(f, "   File: ")?;
+                    for evidence in &reason.evidence {
+                        if let Some(expl) = &evidence.text {
+                            writeln!(f,
+                                "     - {}    > {expl}",
+                                evidence.file.display()
+                            )?;
+                        } else {
+                            writeln!(f, "     - {}", evidence.file.display())?;
                         }
                     }
                 }
+                
                 writeln!(f, "------------------------\n")?;
             }
         } 

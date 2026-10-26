@@ -349,25 +349,25 @@ impl std::fmt::Display for Repository {
 }
 
 fn format_reason(reason: &Reason, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            writeln!(f, "   Confidence: {}", reason.confidence)?;
+    writeln!(f, "   Confidence: {}", reason.confidence)?;
 
-            if !reason.evidence.is_empty(){
-                writeln!(f, "   File: ")?;
-                for evidence in &reason.evidence {
+    if !reason.evidence.is_empty(){
+        writeln!(f, "   File: ")?;
+        for evidence in &reason.evidence {
 
-                    if let Some(expl) = &evidence.text {
-                        writeln!(f,
-                            "     - {}    > {expl}",
-                            evidence.file.display()
-                        )?;
-                    } else {
-                        writeln!(f, "     - {}", evidence.file.display())?;
-                    }
-                }
+            if let Some(expl) = &evidence.text {
+                writeln!(f,
+                    "     - {}    > {expl}",
+                    evidence.file.display()
+                )?;
+            } else {
+                writeln!(f, "     - {}", evidence.file.display())?;
             }
-
-            Ok(())
         }
+    }
+
+    Ok(())
+}
 
 impl std::fmt::Display for Detector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -378,14 +378,11 @@ impl std::fmt::Display for Detector {
             
         } 
 
-        
         if !self.repository.is_empty() {
             for (repository, reason) in &self.repository {
                 writeln!(f, "\n------------------------")?;
                 writeln!(f, "Repository: {repository}")?;
                 writeln!(f, "Reason: ")?;
-
-                writeln!(f, "   Confidence: {}", reason.confidence)?;
 
                 format_reason(reason, f)?;
 
@@ -398,8 +395,6 @@ impl std::fmt::Display for Detector {
                 writeln!(f, "\n------------------------")?;
                 writeln!(f, "Project: {project}")?;
                 writeln!(f, "Reason:")?;
-
-                writeln!(f, "   Confidence: {}", reason.confidence)?;
 
                 format_reason(reason, f)?;
                 

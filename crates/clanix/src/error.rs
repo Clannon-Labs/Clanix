@@ -1,7 +1,9 @@
 
 use std::{ffi::OsString, path::PathBuf};
+use std::time::{Duration};
 
 use thiserror::Error as ThisError;
+use uuid::Uuid;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -76,6 +78,16 @@ pub enum RequestError {
 
     #[error("failed to kill timed-out process: {0}")]
     Kill(#[source] std::io::Error),
+
+    #[error(
+        "Process '{0}..' ran for {elapsed_time:?} while the timeout was {timeout:?}",
+    &id.to_string()[..10])]
+    Timeout {
+        id: Uuid,
+        elapsed_time: Duration,
+        timeout: Duration,
+        working_dir: PathBuf,
+    },
     
     #[error("couldn't get exit status from the process: {0}")]
     StatusError(#[source] std::io::Error),

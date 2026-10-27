@@ -85,7 +85,7 @@ impl std::fmt::Display for ExecutionRequest {
 
         if !self.args.is_empty() {
             // This {:#?} should pretty print, maybe??
-            writeln!(f, "Arguments: {:?}", self.args)?;
+            writeln!(f, "Arguments: {:#?}", self.args)?;
         }
 
         // We keep policy string blank because Policy itself implements
@@ -177,7 +177,7 @@ impl ExecutionRequest {
         });
 
         let mut captured_stdout: Vec<u8> = Vec::new();
-
+        
         // keep checking the incoming (non blocking) bytes in loop
         loop {
             let elapsed_time = start_time.elapsed();
@@ -187,11 +187,19 @@ impl ExecutionRequest {
             if (disable_timeout == false) && elapsed_time >= timeout_s {
                 child.kill()
                     .map_err(|e| RequestError::Kill(e))?;
-                eprintln!(
-                    "Process ran for {:?} while the timeout was {:?}",
-                    elapsed_time, timeout_s
-                );
-                break;
+
+                // Propagate the error message instead of printing to terminal
+                // 
+                // But that would return too early and wont let us prepare the crash report later,
+                // So prepare a rich status report here and return Err()
+                return Err(
+                    RequestError::Timeout {
+                    id,
+                    elapsed_time,
+                    timeout: timeout_s,
+                    working_dir: self.policy.working_dir().to_path_buf()
+                }.into());
+                // break;
             }
 
             match rx.try_recv() {

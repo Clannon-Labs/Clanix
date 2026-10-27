@@ -72,19 +72,19 @@ impl std::fmt::Display for ExecutionResult {
 }
     
 impl ExecutionResult {
-    // These simple methods exist for the caller to call,
-    // because the internal structure might change and
-    // if the caller calls the internal elements directly,
-    // it could break,
-    // so calling these methods is safer because these will
-    // translate whatever was changed internally into what the
-    // callers expect; with no breaking changes
+    /// These simple methods exist for the caller to call,
+    /// because the internal structure might change and
+    /// if the caller calls the internal elements directly,
+    /// it could break,
+    /// so calling these methods is safer because these will
+    /// translate whatever was changed internally into what the
+    /// callers expect; with no breaking changes
 
-    // We dont need this default because the Default trait automatically
-    // produces default values (eg: None for Option<>, 0 for i32 etc),
-    // and we eliminate the need to introduce the overhead of loading data
-    // onto the instance when it's just a default that's gonna be replaced
-    // anyway
+    /// We dont need this default because the Default trait automatically
+    /// produces default values (eg: None for Option<>, 0 for i32 etc),
+    /// and we eliminate the need to introduce the overhead of loading data
+    /// onto the instance when it's just a default that's gonna be replaced
+    /// anyway
 
     pub fn to_json(&self) -> Result<String> {
         serde_json::to_string_pretty(&self)

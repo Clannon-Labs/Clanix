@@ -30,11 +30,11 @@ impl std::fmt::Display for Policy {
 
 type Result<T> = std::result::Result<T, PolicyError>;
 
-/*
- * Calling any method on policy changes data only in memory
- * so if you want to make the change persistent, aka change 
- * in disk, you MUST call the Config methods, not Policy ones
- */
+///
+/// Calling any method on policy changes data only in memory
+/// so if you want to make the change persistent, aka change 
+/// in disk, you MUST call the Config methods, not Policy ones
+///
 impl Policy {
     pub fn default() -> Result<Self> {
         Ok(Self {
@@ -44,7 +44,7 @@ impl Policy {
         })
     }
 
-    // Just an alias for defaults()
+    /// Just an alias for defaults()
     pub fn new() -> Result<Self> {
         Self::default()
     }
@@ -61,14 +61,14 @@ impl Policy {
     pub fn working_dir(&self) -> &Path {
         &self.working_dir
     }
-    
+
+    ///
+    /// If user gives the timeout_s, which makes timeout_s: Some(),
+    /// set the timeout_s for now to that.
+    /// If not, read the timeout_s from config and set the
+    /// timeout_s to that
+    ///
     pub fn set_timeout_s(mut self, timeout_s: Option<u64>) -> Result<Self> {
-        /*
-         * If user gives the timeout_s, which makes timeout_s: Some(),
-         * set the timeout_s for now to that.
-         * If not, read the timeout_s from config and set the
-         * timeout_s to that
-         */
         match timeout_s {
             Some(secs) => {
                 self.timeout_s = Duration::from_secs(secs);
@@ -81,13 +81,13 @@ impl Policy {
         }
     }
 
+    ///
+    /// If user gives the working_dir, which makes working_dir: Some(),
+    /// set the working_dir for now to that.
+    /// If not, read the working_dir from config and set the
+    /// working_dir to that
+    ///
     pub fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Result<Self> {
-        /*
-         * If user gives the working_dir, which makes working_dir: Some(),
-         * set the working_dir for now to that.
-         * If not, read the working_dir from config and set the
-         * working_dir to that
-         */
         match working_dir {
             Some(dir) => {
                 self.working_dir = dir;
@@ -100,13 +100,13 @@ impl Policy {
         }
     }
 
+    ///
+    /// If user gives the disable_timeout, which makes disable: true,
+    /// set the disable_timeout for now to that.
+    /// If not, read the disable_timeout from config and set the
+    /// disable_timeout to that
+    ///
     pub fn set_disable_timeout(mut self, disable: bool) -> Result<Self> {
-        /*
-         * If user gives the disable_timeout, which makes disable: true,
-         * set the disable_timeout for now to that.
-         * If not, read the disable_timeout from config and set the
-         * disable_timeout to that
-         */
         if !disable {
             self.disable_timeout = Config::read()?.disable_timeout();
             return Ok(self)

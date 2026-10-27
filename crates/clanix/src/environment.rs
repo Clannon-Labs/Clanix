@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::{Config, ExecutionRequest, ExecutionResult};
 use crate::Policy;
 use crate::ConfigBuilder;
-use crate::{Error, Result}; // get the default Error type automatically
+use crate::{Error, Result};
 
 use crate::ResultError;
 
@@ -19,6 +19,7 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// Create a brand new environment instance with the default values
     pub fn new() -> Result<Self> {
         Ok(Self {
             request: ExecutionRequest::default()?,
@@ -27,6 +28,10 @@ impl Environment {
         })
     }
 
+    /// Create a new execution request instance.
+    /// 
+    /// Note that this just creates an instance of execution request,
+    /// It doesn't actualy execute the request
     pub fn new_request<S: Into<OsString>>(&self, program: S) -> Result<ExecutionRequest> {
         Ok(ExecutionRequest {
             program: program.into(),
@@ -35,6 +40,8 @@ impl Environment {
         })
     }
 
+    /// After creating an execution request (which is mandatory),
+    /// execute it
     pub fn execute_request(&mut self, request: ExecutionRequest) -> Result<()> {
         let result = ExecutionRequest::execute(&request)?;
         self.request = request;
@@ -42,49 +49,64 @@ impl Environment {
 
         Ok(())
     }
-    
-    pub fn new_result(&self) -> Result<ExecutionResult> {
-        Ok(ExecutionResult::default())
+
+    /// Get the default result instance
+    /// 
+    /// Note that this is just for the case where you just want an execution result
+    /// instance without actually running anything.
+    /// It's not the result you get after executing the request
+    pub fn new_result(&self) -> ExecutionResult {
+        ExecutionResult::default()
     }
 
+    /// Set the config to default
     pub fn set_default_config(&mut self) -> Result<&ConfigBuilder> {
         let config = Config::set_default()?;
         self.config = config;
         Ok(&self.config)
         
     }
-    
-    pub fn what(&self) -> Result<&Self> {
-        Ok(&self)
+
+    /// Get the reference of request field out of the environment instance
+    pub fn request(&self) -> &ExecutionRequest {
+        &self.request
     }
 
-    pub fn request(&self) -> Result<&ExecutionRequest> {
-        Ok(&self.request)
-    }
-
+    /// Get the reference of result field out of the environment instance
     pub fn result(&self) -> Result<&ExecutionResult> {
         self.result
             .as_ref()
             .ok_or_else(|| Error::Result(ResultError::Empty)) 
     }
 
+    /// Get the mutable reference of the result field
     pub fn result_mut(&mut self) -> Result<&mut ExecutionResult> {
         self.result
             .as_mut()
             .ok_or_else(|| Error::Result(ResultError::Empty))
             
     }
-    
-    pub fn config(&self) -> Result<&ConfigBuilder> {
-        Ok(&self.config)
+
+    /// Get the reference of config/configbuilder instance
+    pub fn config(&self) -> &ConfigBuilder {
+        &self.config
     }
 
+    /// Get the mutable reference of config/configbuilder instance
     pub fn config_mut(&mut self) -> Result<&mut ConfigBuilder> {
         Ok(&mut self.config)
     }
 
-    pub fn policy(&self) -> Result<&Policy> {
-        Ok(&self.request.policy)
+    /// Get the reference of config instance that was passed when the
+    /// user made the execution request
+    /// 
+    /// Note that policy is the temporary (one for each run) config that
+    /// gets reset for each run
+    /// 
+    /// The persistent version is the config, which stays on disk
+    /// and can stay same for all runs
+    pub fn policy(&self) -> &Policy {
+        &self.request.policy
     }
 
 }

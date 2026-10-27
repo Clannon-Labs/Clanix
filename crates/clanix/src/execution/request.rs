@@ -37,14 +37,14 @@ fn serialize_os_string<S>(
     serializer: S,
 ) -> std::result::Result<S::Ok, S::Error>
     where
-        S: Serializer, 
+        S: Serializer,
     {
         value.to_string_lossy().serialize(serializer)
     }
 
 fn deserialize_os_string<'de, D> (
     deserializer: D
-) -> std::result::Result<OsString, D::Error> 
+) -> std::result::Result<OsString, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -54,7 +54,7 @@ fn deserialize_os_string<'de, D> (
 fn serialize_os_strings<S>(
     values: &[OsString],
     serializer: S
-) -> std::result::Result<S::Ok, S::Error> 
+) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -76,7 +76,7 @@ fn deserialize_os_strings<'de, D>(
                 .map(OsString::from)
                 .collect())
     }
-    
+
 impl std::fmt::Display for ExecutionRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\nExecution Request")?;
@@ -91,7 +91,7 @@ impl std::fmt::Display for ExecutionRequest {
         // We keep policy string blank because Policy itself implements
         // its Display version
         writeln!(f, "{}", self.policy)?;
-        
+
         Ok(())
     }
 }
@@ -105,15 +105,15 @@ impl ExecutionRequest {
         })
     }
 
-    // It consumes the request after you call execute,
-    // so you have to create a new request if you want
-    // to call execute again
+    /// It consumes the request after you call execute,
+    /// so you have to create a new request if you want
+    /// to call execute again
     pub(crate) fn execute(&self) -> Result<ExecutionResult> {
         /*
             * Change all the panic creating .expect()s with proper
             * error handling later
             */
-        
+
         let working_dir = &self.policy.working_dir();
         let timeout_s = self.policy.timeout_s();
         let disable_timeout = self.policy.disable_timeout();
@@ -121,7 +121,7 @@ impl ExecutionRequest {
         // println!("Current working directory is {:?}", &working_dir);
         // println!("Timeout_s: {:?}", timeout_s);
         // println!("Timeout disable: {}", disable_timeout);
-        
+
         let mut child = Command::new(&self.program)
             .args(&self.args)
             .current_dir(working_dir)
@@ -131,7 +131,7 @@ impl ExecutionRequest {
             .map_err(|_| RequestError::SpawnError)?;
 
         // println!("Just ran the command");
-        
+
         let start_time = Instant::now();
         let id = Uuid::new_v4();
 
@@ -139,18 +139,18 @@ impl ExecutionRequest {
 
         let mut stdout_stream = child.stdout.take()
             .ok_or_else(|| RequestError::StdoutError)?;
-        
+
         let mut stderr_stream = child.stderr.take()
             .ok_or_else(|| RequestError::StderrError)?;
 
         // println!("Just took stdout and stderr streams");
-        
+
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
 
         // println!("Just created a channel for Vec<u8>");
-        
+
         std::thread::spawn(move || {
-            let mut buffer = [0u8; 1024]; // 1KB buffer            
+            let mut buffer = [0u8; 1024]; // 1KB buffer
             while let Ok(bytes_read) = stdout_stream.read(&mut buffer){
                 if bytes_read == 0 {break;}
                 if tx.send(buffer[..bytes_read].to_vec()).is_err() {
@@ -211,14 +211,14 @@ impl ExecutionRequest {
             working_dir: self.policy.working_dir().to_path_buf()
         })
     }
-    
+
     pub fn arg<S: Into<OsString>>(mut self, arg: S) -> Self {
         self.args.push(arg.into());
         self
     }
 
     // This is used to pass multiple arguments or a Vec< >
-    pub fn args<I, S>(mut self, args: I) -> Self 
+    pub fn args<I, S>(mut self, args: I) -> Self
         where
             I: IntoIterator<Item = S>,
             S: Into<OsString>,
@@ -229,21 +229,20 @@ impl ExecutionRequest {
             self
         }
 
-    /*
-     * These functions return Error(which gets converted from PolicyError internally) 
-     * instead of RequestError because these are used to change the policy state and
-     * not to actually request the execution.
-     * 
-     * Also as you are seeing, the method used to actually request execution (execute())
-     * returns RequestError wrapped in the Error
-     */
-        
-    // This is used to get the policy so you can later set
-    // the individual policy key
-    // These functions are for setting the individual
-    // policy keys
+    ///
+    /// These functions return Error(which gets converted from PolicyError internally)
+    /// instead of RequestError because these are used to change the policy state and
+    /// not to actually request the execution.
+    ///
+    /// Also as you are seeing, the method used to actually request execution (execute())
+    /// returns RequestError wrapped in the Error
+    ///
+    /// This is used to get the policy so you can later set
+    /// the individual policy key
+    /// These functions are for setting the individual
+    /// policy keys
     pub fn set_timeout_s(mut self, timeout_s: Option<u64>) -> Result<Self> {
-        self.policy = Policy::set_timeout_s(self.policy, timeout_s)?;        
+        self.policy = Policy::set_timeout_s(self.policy, timeout_s)?;
         Ok(self)
     }
 
@@ -251,7 +250,7 @@ impl ExecutionRequest {
         self.policy = Policy::set_disable_timeout(self.policy, disable)?;
         Ok(self)
     }
-    
+
     pub fn set_working_dir(mut self, directory: Option<PathBuf>) -> Result<Self> {
         self.policy = Policy::set_working_dir(self.policy, directory)?;
         Ok(self)

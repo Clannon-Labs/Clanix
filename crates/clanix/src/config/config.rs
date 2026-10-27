@@ -92,7 +92,7 @@ impl Config {
     
     pub fn default_working_dir() -> Result<PathBuf> {
         env::current_dir()
-            .map_err(|_| ConfigError::WorkingDir)
+            .map_err(|e| ConfigError::WorkingDir(e))
     }
 
     /// timeout is enabled (or not disabled) by default
@@ -194,7 +194,10 @@ impl ConfigBuilder {
         .map_err(ConfigError::PrepareToml)?;
 
         fs::write(&NAME_TOML, config)
-            .map_err(|_| ConfigError::Write)?;
+            .map_err(|source| ConfigError::Write {
+                working_dir: self.working_dir.clone(),
+                source
+            })?;
         
         Ok(self)
     }
@@ -209,7 +212,10 @@ impl ConfigBuilder {
             //     .map_err(ConfigError::Open)?;
             
             let content = fs::read_to_string(NAME_TOML)
-                .map_err(ConfigError::Read)?;
+                .map_err(|source| ConfigError::Read {
+                    working_dir: PathBuf::from(NAME_TOML),
+                    source
+                })?;
             toml::from_str(&content)
                 .map_err(ConfigError::ParseToml)? 
             

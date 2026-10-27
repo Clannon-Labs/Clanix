@@ -1,5 +1,5 @@
 
-use std::path::PathBuf;
+use std::{ffi::OsString, path::PathBuf};
 
 use thiserror::Error as ThisError;
 
@@ -8,39 +8,39 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("Request stage failed: {0}")]
+    #[error("request stage failed: {0}")]
     Request(#[from] RequestError),
 
-    #[error("Result stage failed: {0}")]
+    #[error("result stage failed: {0}")]
     Result(#[from] ResultError),
 
-    #[error("Project detection failed")]
+    #[error("project detection failed")]
     Detect(#[from] std::io::Error),
 
-    #[error("Failed to walk the directories")]
+    #[error("failed to walk the directories: {0}")]
     WalkError(#[from] walkdir::Error),
 
-    #[error("Invalid filename {0}")]
+    #[error("invalid filename {0}")]
     InvalidFilename(PathBuf),
 
-    #[error("Invalid directory name {0}")]
+    #[error("invalid directory name {0}")]
     InvalidDirectoryName(PathBuf),
     
     // to convert policy error back to request error
-    #[error("Invalid execution policy")]
+    #[error("invalid execution policy: {0}")]
     Policy(#[from] PolicyError),
 
     // to convert policy error back to request error
-    #[error("Invalid execution config")]
+    #[error("invalid execution config: {0}")]
     Config(#[from] ConfigError),
 
-    #[error("Couldn't convert to json")]
+    #[error("couldn't convert to json: {0}")]
     JsonError(#[from] serde_json::Error),
 
-    #[error("Couldn't convert to toml")]
+    #[error("couldn't convert to toml: {0}")]
     TomlError(#[from] toml::ser::Error),
     
-    #[error("Unknown stage found!")]
+    #[error("unknown stage found!")]
     Unknown,
 }
 
@@ -48,62 +48,70 @@ pub enum Error {
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum RequestError {
-    #[error("Given request is not confirmed for execution. Call .confirm() to confirm it!")]
+    #[error("given request is not confirmed for execution. Call .confirm() to confirm it!")]
     ConfirmError,
     
-    #[error("Couldnot spawn a child process")]
-    SpawnError,
+    #[error(
+        "couldn't spawn program {program:?} in the working directory {working_dir:?}: {source}"
+    )]
+    SpawnError{
+        program: OsString,
+        working_dir: PathBuf,
 
-    #[error("Couldn't get stdout stream!")]
-    StdoutError,
+        #[source]
+        source: std::io::Error
+    },
 
-    #[error("Couldn't get stderr stream!")]
-    StderrError,
+    #[error("child process did not provide a stdout stream!")]
+    StdoutUnavailable,
 
-    #[error("Couldn't get exit status from the process")]
-    StatusError,
+    #[error("child process did not provide a stderr stream!")]
+    StderrUnavailable,
+
+    #[error("couldn't get exit status from the process: {0}")]
+    StatusError(#[source] std::io::Error),
     
-    #[error("Program is empty")]
+    #[error("program is empty")]
     EmptyProgram,
 
-    #[error("Argument(s) is invalid")]
+    #[error("argument(s) is invalid")]
     InvalidArgs,
 
-    #[error("Couldn't convert to json")]
+    #[error("couldn't convert to json: {0}")]
     JsonError(#[from] serde_json::Error),
 
-    #[error("Couldn't convert to toml")]
+    #[error("couldn't convert to toml: {0}")]
     TomlError(#[from] toml::ser::Error),
 }
 
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum ResultError {
-    #[error("Given result is empty")]
+    #[error("given result is empty")]
     Empty,
 
-    #[error("Couldn't convert to json")]
+    #[error("couldn't convert to json: {0}")]
     JsonError(#[from] serde_json::Error),
 
-    #[error("Couldn't convert to toml")]
+    #[error("couldn't convert to toml: {0}")]
     TomlError(#[from] toml::ser::Error),
     
-    #[error("Invalid id found in the result")]
+    #[error("invalid id found in the result")]
     InvalidId,
 
-    #[error("Invalid success type")]
+    #[error("invalid success type")]
     InvalidSuccessType,
 
-    #[error("Invalid status type")]
+    #[error("invalid status type")]
     InvalidStatus,
 
-    #[error("Invalid stdout")]
+    #[error("invalid stdout")]
     InvalidStdout,
 
-    #[error("Invalid stderr")]
+    #[error("invalid stderr")]
     InvalidStderr,
 
-    #[error("Invalid working directory found!")]
+    #[error("invalid working directory found!")]
     InvalidWorkingDir
 }
 
@@ -111,38 +119,44 @@ pub enum ResultError {
 #[derive(Debug, ThisError)]
 #[non_exhaustive] // to ensure future addition in errors wont break the system
 pub enum PolicyError {
-    #[error("Invalid disable timeout type")]
-    InvaildDisableTimeout,
+    #[error("invalid working directory: {}", path.display())]
+    InvalidWorkingDir{
+        path: PathBuf
+    },
 
-    #[error("Invalid timeout")]
-    InvalidTimeout,
-
-    #[error("Invalid working directory")]
-    InvalidWorkingDir,
-
-    #[error("Error occured while reading config value")]
+    #[error("error occured while reading config value: {0}")]
     Config(#[from] ConfigError)
 }
 
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum ConfigError {
-    #[error("Couldn't get the default working directory for the current environment")]
-    WorkingDir,
+    #[error("couldn't get the default working directory: {0}")]
+    WorkingDir(#[source] std::io::Error),
     
-    #[error("Couldn't read value from config!")]
-    Read(#[from] std::io::Error),
+    #[error("couldn't read value from configuration file {}: {source}", working_dir.display())]
+    Read {
+        working_dir: PathBuf,
 
-    #[error("Couldn't write value to config!")]
-    Write,
+        #[source]
+        source: std::io::Error
+    },
 
-    #[error("Couldn't prepare config value!")]
+    #[error("couldn't write value to configuration file {}: {source}", working_dir.display())]
+    Write {
+        working_dir: PathBuf,
+
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("couldn't prepare configuration value as toml!: {0}")]
     PrepareToml(#[from] toml::ser::Error),
 
-    #[error("Couldn't parse config value!")]
+    #[error("couldn't parse configuration value as toml!: {0}")]
     ParseToml(#[from] toml::de::Error),
 
-    #[error("Error occured in json")]
+    #[error("couldn't serialize configuration as JSON: {0}")]
     JsonError(#[from] serde_json::Error),
 }
 

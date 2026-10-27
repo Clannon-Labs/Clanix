@@ -121,6 +121,7 @@ impl ExecutionRequest {
         // println!("Current working directory is {:?}", &working_dir);
         // println!("Timeout_s: {:?}", timeout_s);
         // println!("Timeout disable: {}", disable_timeout);
+        // println!("Executing: {self:#?}");
 
         let mut child = Command::new(&self.program)
             .args(&self.args)
@@ -128,8 +129,13 @@ impl ExecutionRequest {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|_| RequestError::SpawnError)?;
+            .map_err(|source| RequestError::SpawnError {
+                program: self.program.clone(),
+                working_dir: working_dir.to_path_buf(),
+                source,
+            })?;
 
+        
         // println!("Just ran the command");
 
         let start_time = Instant::now();
@@ -138,10 +144,10 @@ impl ExecutionRequest {
         // println!("Just set the start time and id");
 
         let mut stdout_stream = child.stdout.take()
-            .ok_or_else(|| RequestError::StdoutError)?;
+            .ok_or_else(|| RequestError::StdoutUnavailable)?;
 
         let mut stderr_stream = child.stderr.take()
-            .ok_or_else(|| RequestError::StderrError)?;
+            .ok_or_else(|| RequestError::StderrUnavailable)?;
 
         // println!("Just took stdout and stderr streams");
 
@@ -196,7 +202,7 @@ impl ExecutionRequest {
         }
 
         let exit_status = child.wait()
-            .map_err(|_| RequestError::StatusError)?;
+            .map_err(RequestError::StatusError)?;
 
         // Read the stderr if there is any
         let mut captured_stderr: Vec<u8> = Vec::new();

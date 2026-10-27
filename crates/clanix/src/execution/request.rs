@@ -151,17 +151,27 @@ impl ExecutionRequest {
 
         // println!("Just took stdout and stderr streams");
 
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let (tx, rx) = mpsc::channel::<std::io::Result<Vec<u8>>>();
 
         // println!("Just created a channel for Vec<u8>");
 
         std::thread::spawn(move || {
-            let mut buffer = [0u8; 1024]; // 1KB buffer
-            while let Ok(bytes_read) = stdout_stream.read(&mut buffer){
-                if bytes_read == 0 {break;}
-                if tx.send(buffer[..bytes_read].to_vec()).is_err() {
-                    // println!("Just sent some bytes to buffer");
-                    break;
+            let mut buffer = [0u8; 1024];
+
+            loop {
+                match stdout_stream.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(bytes_read) => {
+                        if tx.send(Ok(buffer[..bytes_read].to_vec())).is_err() {
+                            break;
+                        }
+                    },
+                    Err(err) => {
+                        // If error is occured, send the error and then break instead of 
+                        // silently breaking
+                        let _ = tx.send(Err(err));
+                        break;
+                    }
                 }
             }
         });
@@ -175,8 +185,9 @@ impl ExecutionRequest {
             // kill it before you do anything else
             // println!("About to check disable_timeout: {} and timeout_s: {:?}", disable_timeout, timeout_s);
             if (disable_timeout == false) && elapsed_time >= timeout_s {
-                let _ = child.kill();
-                println!(
+                child.kill()
+                    .map_err(|e| RequestError::Kill(e))?;
+                eprintln!(
                     "Process ran for {:?} while the timeout was {:?}",
                     elapsed_time, timeout_s
                 );
@@ -184,9 +195,12 @@ impl ExecutionRequest {
             }
 
             match rx.try_recv() {
-                Ok(bytes) => {
+                Ok(Ok(bytes)) => {
                     captured_stdout.extend(bytes);
                     // println!("Just extended captured_stdout with some bytes")
+                },
+                Ok(Err(error)) => {
+                    return Err(RequestError::StdoutRead(error).into());
                 },
                 Err(mpsc::TryRecvError::Empty) => {
                     // No bytes to read.. EOF maybe??
@@ -206,7 +220,8 @@ impl ExecutionRequest {
 
         // Read the stderr if there is any
         let mut captured_stderr: Vec<u8> = Vec::new();
-        let _ = stderr_stream.read_to_end(&mut captured_stderr);
+        stderr_stream.read_to_end(&mut captured_stderr)
+            .map_err(|e| RequestError::StderrRead(e))?;
 
         Ok(ExecutionResult {
             id,

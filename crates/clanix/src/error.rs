@@ -14,7 +14,7 @@ pub enum Error {
     #[error("result stage failed: {0}")]
     Result(#[from] ResultError),
 
-    #[error("project detection failed")]
+    #[error("project detection failed: {0}")]
     Detect(#[from] std::io::Error),
 
     #[error("failed to walk the directories: {0}")]
@@ -26,11 +26,11 @@ pub enum Error {
     #[error("invalid directory name {0}")]
     InvalidDirectoryName(PathBuf),
     
-    // to convert policy error back to request error
+    // Convert policy errors into the crate-level error type
     #[error("invalid execution policy: {0}")]
     Policy(#[from] PolicyError),
 
-    // to convert policy error back to request error
+    // Convert config errors into the crate-level error type
     #[error("invalid execution config: {0}")]
     Config(#[from] ConfigError),
 
@@ -52,7 +52,7 @@ pub enum RequestError {
     ConfirmError,
     
     #[error(
-        "couldn't spawn program {program:?} in the working directory {working_dir:?}: {source}"
+        "couldn't spawn program {program:?} in the working directory {}: {source}", working_dir.display()
     )]
     SpawnError{
         program: OsString,
@@ -68,19 +68,28 @@ pub enum RequestError {
     #[error("child process did not provide a stderr stream!")]
     StderrUnavailable,
 
+    #[error("failed to read child process stdout: {0}")]
+    StdoutRead(#[source] std::io::Error),
+    
+    #[error("failed to read child process stderr: {0}")]
+    StderrRead(#[source] std::io::Error),
+
+    #[error("failed to kill timed-out process: {0}")]
+    Kill(#[source] std::io::Error),
+    
     #[error("couldn't get exit status from the process: {0}")]
     StatusError(#[source] std::io::Error),
     
     #[error("program is empty")]
     EmptyProgram,
 
-    #[error("argument(s) is invalid")]
-    InvalidArgs,
+    #[error("argument(s) is invalid: {0}")]
+    InvalidArgs(String),
 
-    #[error("couldn't convert to json: {0}")]
+    #[error("couldn't serialize execution request as JSON: {0}")]
     JsonError(#[from] serde_json::Error),
 
-    #[error("couldn't convert to toml: {0}")]
+    #[error("couldn't serialize execution result as TOML: {0}")]
     TomlError(#[from] toml::ser::Error),
 }
 

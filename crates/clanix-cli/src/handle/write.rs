@@ -1,31 +1,30 @@
-
 use std::fs;
 use std::path::PathBuf;
 
 use clanix::Environment;
+use color_print::cformat;
 
 use crate::NAME;
 use crate::error::Result;
 
 pub fn handle_write(
     environment: &mut Environment,
-    verbose: bool, 
-    path: PathBuf, 
-    content: String
+    verbose: bool,
+    path: PathBuf,
+    content: String,
 ) -> Result<()> {
-
     let result = environment.result()?;
-        
+
     let final_path = result.working_dir().join(path);
-    fs::write(&final_path, &content)?; 
+    fs::write(&final_path, &content)?;
 
-    let message = if verbose {
-        environment.to_string()
+    if verbose {
+        println!("{environment}");
     } else {
-        format!("{NAME}: [SIMULATED]: Wrote to {final_path:?}")
-    };
-
-    println!("{message}");
+        let label = cformat!("<bold><green>✔{NAME}</>");
+        let simulated = cformat!("<yellow>[simulated]</>");
+        println!("{label}  {simulated} Wrote to {}", final_path.display());
+    }
 
     let result = environment.result_mut()?;
 

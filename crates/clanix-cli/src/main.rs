@@ -1,33 +1,27 @@
 //! clanix-cli is the client that uses the abstraction/apis
 //! provided by the clanix library to do the tasks the user wants.
-//! 
+//!
 //! Clients just handles the user facing part and doesn't worry about how the actual
 //! work is done behind the scenes by clanix.
-//! 
+//!
 //! Clients can design the user facing api/commands however they want and clanix doesn't
 //! care about any of that, all the client needs to do is use the structs/methods provided
 //! by clanix, doesn't matter how client wants to use them to make the user facing cli
 //! or whatever the client does
 
-mod handle;
 mod error;
+mod handle;
 
-use handle::*;
 use crate::error::Error;
+use handle::*;
 
 use std::path::PathBuf;
 
-use clap::{
-    Parser,
-    Subcommand,
-    ValueEnum,
-};
+use clap::{Parser, Subcommand, ValueEnum};
+use color_print::cformat;
 use serde::{Deserialize, Serialize};
 
-use clanix::{
-    Environment,
-    Detector,
-};
+use clanix::{Detector, Environment};
 
 const NAME: &str = "Clanix";
 const REPO: &str = "https://github.com/Clannon-Labs/Clanix";
@@ -36,8 +30,8 @@ const REPO: &str = "https://github.com/Clannon-Labs/Clanix";
 #[command(name = "clanix")]
 #[command(version)]
 #[command(
-about = format!("{NAME} is a fast developer execution tool built by Clannon Labs - Cybro
-Visit '{REPO}' to read the documents"
+about = cformat!("<bold>{NAME}</> is a fast developer execution tool built by creator of <bold>Clannon Labs</>: <bold, underline>Cybro</>
+Visit <blue, underline>{REPO}</> to read the documents"
 ))]
 struct CliInput {
     /// The commands the user actually types
@@ -54,7 +48,7 @@ struct CliInput {
         long = "working-dir",
         visible_alias = "wd",
         help = "The directory for this one operation"
-    )] 
+    )]
     working_dir: Option<PathBuf>,
 
     /// Option to enable/to disable verbosity.
@@ -99,11 +93,7 @@ struct CliInput {
     disable_timeout: bool,
 
     /// The actual timeout you want to set
-    #[arg(
-        short,
-        long,
-        help = "The actual timeout you want to set(in seconds)"
-    )]
+    #[arg(short, long, help = "The actual timeout you want to set(in seconds)")]
     timeout: Option<u64>,
 }
 
@@ -112,10 +102,7 @@ struct CliInput {
 enum Commands {
     /// A basic command you can use to run something inside clanix
     #[command(about = "A basic command you can use to run something inside clanix")]
-    Run { 
-        program: String,
-        args: Vec<String>,
-    },
+    Run { program: String, args: Vec<String> },
 
     /// Just simulates test for now, we can put actual testing in future
     #[command(about = "Just simulates test for now, we can put actual testing in future")]
@@ -125,7 +112,7 @@ enum Commands {
     Init,
 
     /// This detects what type of project are you running clanix on
-    /// 
+    ///
     /// Note that currently, it is not that useful as the detection mechanisms are very
     /// basic, but once those mechanisms are built properly, it can be quite useful
     /// for clanix to automate the tasks without requiring dog fooding from the user
@@ -134,14 +121,11 @@ enum Commands {
 
     /// To write some content to disk
     #[command(about = "To write some content to disk")]
-    Write {
-        content: String,
-        path: PathBuf
-    },
+    Write { content: String, path: PathBuf },
 
-    /// All the configs are either read from the config file or 
+    /// All the configs are either read from the config file or
     /// set by core, cli doesn't do it itself.
-    /// 
+    ///
     /// Cli can just change the config for any one operation only
     /// unless you explicitly call the 'default' and 'set' commands
     #[command(about = "Command to manage config. Run clanix config --help to get more info")]
@@ -156,12 +140,8 @@ enum ConfigCommands {
     /// Set/change individual config value.
     #[command(about = "Set/change individual config value.")]
     Set {
-
         /// Set the config back to the default (use carefully)
-        #[arg(
-            long,
-            help = "Set the config back to the default (use carefully)"
-        )]
+        #[arg(long, help = "Set the config back to the default (use carefully)")]
         default: bool,
 
         /// Change/set the config value stored in disable_timeout
@@ -173,11 +153,7 @@ enum ConfigCommands {
         disable_timeout: Option<bool>,
 
         /// Change/set the config value stored in timeout_s
-        #[arg(
-            short, 
-            long,
-            help = "Change/set the config value stored in timeout_s"
-        )]
+        #[arg(short, long, help = "Change/set the config value stored in timeout_s")]
         timeout_s: Option<u64>,
 
         /// Change/set the config value stored in working_dir
@@ -192,7 +168,6 @@ enum ConfigCommands {
     /// Get the values you have in config.
     #[command(about = "Get the values you have in config.")]
     What {
-
         /// Get the config value stored in disable_timeout
         #[arg(
             long = "disable-timeout",
@@ -202,11 +177,7 @@ enum ConfigCommands {
         disable_timeout: bool,
 
         /// Get the config value stored in timeout_s
-        #[arg(
-            short, 
-            long,
-            help = "Get the config value stored in timeout_s"
-        )]
+        #[arg(short, long, help = "Get the config value stored in timeout_s")]
         timeout_s: bool,
 
         /// Get the config value stored in working_dir
@@ -216,7 +187,7 @@ enum ConfigCommands {
             help = "Get the config value stored in working_dir"
         )]
         working_dir: bool,
-    }
+    },
 }
 
 /// The output formats available for the snapshots and whatever else
@@ -230,7 +201,8 @@ enum OutputFormat {
 
 fn main() {
     if let Err(err) = clanix_cli() {
-        eprintln!("{err}");
+        let error_label = cformat!("<bold><red>✖ Clanix error</>");
+        eprintln!("\n{error_label}\n  {err}\n");
 
         std::process::exit(1);
     }
@@ -244,15 +216,14 @@ fn clanix_cli() -> Result<(), Error> {
         output_format,
         timeout,
         disable_timeout,
-        working_dir
+        working_dir,
     } = CliInput::parse();
 
     // Create a new environment for execution
     let mut environment = Environment::new()?;
-    
+
     match command {
         Commands::Run { program, args } => {
-            
             let _ = run::handle_run(
                 &mut environment,
                 program,
@@ -260,31 +231,35 @@ fn clanix_cli() -> Result<(), Error> {
                 verbose,
                 disable_timeout,
                 timeout,
-                working_dir
+                working_dir,
             )?;
 
             // println!("{environment}");
         }
         Commands::Test => {
             let _ = test::handle_test(&mut environment, verbose);
-        },
+        }
         Commands::Init => {
-            println!("Init is not developed yet!")
-        },
+            let notice = cformat!("<bold><yellow>Coming soon</>");
+            println!("{notice}  Project initialization is not available yet.");
+        }
         Commands::What => {
             // Give an instance of the detector
             let mut detector = Detector::new();
             // Detect the project
             detector.detect()?;
-            
+
+            let heading = cformat!("<bold><cyan>Project detection</>");
+            // See the projects and their reasons on why they were detected.
+            // 
+            // Note that this currently shows a full verbose output in the terminal
             let reason = detector.why();
-            println!("{reason}");
-            // println!("What is not developed yet!")
-        },
+            println!("{heading}\n{reason}");
+        }
         Commands::Write { content, path } => {
             let _ = write::handle_write(&mut environment, verbose, path, content);
-        },
-        Commands::Config {configcommand} => {
+        }
+        Commands::Config { configcommand } => {
             let _ = config::handle_config(&mut environment, configcommand, verbose);
         }
     }

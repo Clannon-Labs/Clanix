@@ -1,4 +1,4 @@
-//! clanix-cli is the client that uses the abstraction
+//! clanix-cli is the client that uses the abstraction/apis
 //! provided by the clanix library to do the tasks the user wants.
 //! 
 //! Clients just handles the user facing part and doesn't worry about how the actual
@@ -30,13 +30,14 @@ use clanix::{
 };
 
 const NAME: &str = "Clanix";
+const REPO: &str = "https://github.com/Clannon-Labs/Clanix";
 
 #[derive(Parser, Debug)]
 #[command(name = "clanix")]
 #[command(version)]
 #[command(
 about = format!("{NAME} is a fast developer execution tool built by Clannon Labs - Cybro
-Visit https://github.com/Clannon-Labs/Clanix to read the documents"
+Visit '{REPO}' to read the documents"
 ))]
 struct CliInput {
     /// The commands the user actually types
@@ -123,6 +124,11 @@ enum Commands {
     #[command(about = "Initialize the clanix project")]
     Init,
 
+    /// This detects what type of project are you running clanix on
+    /// 
+    /// Note that currently, it is not that useful as the detection mechanisms are very
+    /// basic, but once those mechanisms are built properly, it can be quite useful
+    /// for clanix to automate the tasks without requiring dog fooding from the user
     #[command(about = "Detect what project it is")]
     What,
 
@@ -147,14 +153,18 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 enum ConfigCommands {
+    /// Set/change individual config value.
     #[command(about = "Set/change individual config value.")]
     Set {
+
+        /// Set the config back to the default (use carefully)
         #[arg(
             long,
-            help = "Set the config back to the default (use carefully"
+            help = "Set the config back to the default (use carefully)"
         )]
         default: bool,
-        
+
+        /// Change/set the config value stored in disable_timeout
         #[arg(
             long = "disable-timeout",
             visible_alias = "dt",
@@ -162,6 +172,7 @@ enum ConfigCommands {
         )]
         disable_timeout: Option<bool>,
 
+        /// Change/set the config value stored in timeout_s
         #[arg(
             short, 
             long,
@@ -169,6 +180,7 @@ enum ConfigCommands {
         )]
         timeout_s: Option<u64>,
 
+        /// Change/set the config value stored in working_dir
         #[arg(
             long = "working-dir",
             visible_alias = "wd",
@@ -177,8 +189,11 @@ enum ConfigCommands {
         working_dir: Option<PathBuf>,
     },
 
+    /// Get the values you have in config.
     #[command(about = "Get the values you have in config.")]
     What {
+
+        /// Get the config value stored in disable_timeout
         #[arg(
             long = "disable-timeout",
             visible_alias = "dt",
@@ -186,6 +201,7 @@ enum ConfigCommands {
         )]
         disable_timeout: bool,
 
+        /// Get the config value stored in timeout_s
         #[arg(
             short, 
             long,
@@ -193,6 +209,7 @@ enum ConfigCommands {
         )]
         timeout_s: bool,
 
+        /// Get the config value stored in working_dir
         #[arg(
             long = "working-dir",
             visible_alias = "wd",

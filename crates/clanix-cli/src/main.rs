@@ -35,9 +35,9 @@ const NAME: &str = "Clanix";
 #[command(name = "clanix")]
 #[command(version)]
 #[command(
-about = "{NAME} is a fast developer execution tool built by Clannon Labs - Cybro
+about = format!("{NAME} is a fast developer execution tool built by Clannon Labs - Cybro
 Visit https://github.com/Clannon-Labs/Clanix to read the documents"
-)]
+))]
 struct CliInput {
     /// The commands the user actually types
     /// For example: run, write, config etc
@@ -211,8 +211,15 @@ enum OutputFormat {
     Toml,
 }
 
+fn main() {
+    if let Err(err) = clanix_cli() {
+        eprintln!("{err}");
 
-fn main() -> Result<(), Error> {
+        std::process::exit(1);
+    }
+}
+
+fn clanix_cli() -> Result<(), Error> {
     let CliInput {
         command,
         verbose,

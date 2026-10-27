@@ -143,17 +143,17 @@ pub enum ConfigError {
     #[error("couldn't get the default working directory: {0}")]
     WorkingDir(#[source] std::io::Error),
     
-    #[error("couldn't read value from configuration file {}: {source}", working_dir.display())]
+    #[error("couldn't read value from configuration file {}: {source}", path.display())]
     Read {
-        working_dir: PathBuf,
+        path: PathBuf,
 
         #[source]
         source: std::io::Error
     },
 
-    #[error("couldn't write value to configuration file {}: {source}", working_dir.display())]
+    #[error("couldn't write value to configuration file {}: {source}", path.display())]
     Write {
-        working_dir: PathBuf,
+        path: PathBuf,
 
         #[source]
         source: std::io::Error,

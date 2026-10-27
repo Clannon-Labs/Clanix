@@ -195,7 +195,7 @@ impl ConfigBuilder {
 
         fs::write(&NAME_TOML, config)
             .map_err(|source| ConfigError::Write {
-                working_dir: self.working_dir.clone(),
+                path: PathBuf::from(NAME_TOML),
                 source
             })?;
         
@@ -213,7 +213,7 @@ impl ConfigBuilder {
             
             let content = fs::read_to_string(NAME_TOML)
                 .map_err(|source| ConfigError::Read {
-                    working_dir: PathBuf::from(NAME_TOML),
+                    path: PathBuf::from(NAME_TOML),
                     source
                 })?;
             toml::from_str(&content)

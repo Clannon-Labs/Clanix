@@ -116,6 +116,24 @@ pub enum ResultError {
     #[error("given result is empty")]
     Empty,
 
+    #[error("given result has stdout and stderr as separate fields")]
+    SeparatedError,
+
+    #[error("given result has a single output field")]
+    MergedError,
+
+    #[error("given result is terminal/interactive")]
+    TerminalError,
+
+    #[error("given result is unknown")]
+    UnknownError,
+
+    #[error("cannot set separate stdout when output is not in separate mode")]
+    SetStdoutError,
+
+    #[error("cannot set separate stderr when output is not in separate mode")]
+    SetStderrError,
+    
     #[error("couldn't convert to json: {0}")]
     JsonError(#[from] serde_json::Error),
 

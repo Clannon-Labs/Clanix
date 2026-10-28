@@ -1,3 +1,8 @@
+//! The place where the error returned by the crate are defined
+//! 
+//! If you want to know what are the errors you might get as the consumer
+//! of this crate, you just have to look in this file, and you would know 
+//! everything related to the errors
 
 use std::{ffi::OsString, path::PathBuf};
 use std::time::{Duration};

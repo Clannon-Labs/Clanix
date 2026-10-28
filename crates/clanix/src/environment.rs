@@ -10,8 +10,18 @@ use crate::{Error, Result};
 
 use crate::ResultError;
 
-// This could be made richer and better instead of just a glue of other structs
-#[derive(Debug, Clone, Serialize)]
+/// The main Environment struct that provides a clean set of APIs the users can
+/// call to manage the environment more easily instead of having to think about every
+/// minor detail
+/// 
+/// But note that you can still call the methods provided by each layer (i.e. ExecutionRequest,
+/// ExecutionResult, Config etc); only if you want finer controls on the environment ofc
+/// 
+/// If you just want to use the environment without having to coordinate between multiple stages
+/// and managing each thing, the Environment will increasingly provide a better set of APIs
+/// to do so
+/// 
+#[derive(Debug, Clone, Serialize)] // This could be made more richer and informative ig
 pub struct Environment {
     request: ExecutionRequest,
     result: Option<ExecutionResult>,
@@ -32,6 +42,11 @@ impl Environment {
     /// 
     /// Note that this just creates an instance of execution request,
     /// It doesn't actualy execute the request
+    /// 
+    /// It lets you get the ExecutionRequest instance the moment you call it
+    /// and pass the arguments to it along the way (i.e. by chaining commands)
+    /// and at last, when you want to actually execute it, you can call the
+    /// executer method
     pub fn new_request<S: Into<OsString>>(&self, program: S) -> Result<ExecutionRequest> {
         Ok(ExecutionRequest {
             program: program.into(),
@@ -93,8 +108,8 @@ impl Environment {
     }
 
     /// Get the mutable reference of config/configbuilder instance
-    pub fn config_mut(&mut self) -> Result<&mut ConfigBuilder> {
-        Ok(&mut self.config)
+    pub fn config_mut(&mut self) -> &mut ConfigBuilder {
+        &mut self.config
     }
 
     /// Get the reference of config instance that was passed when the

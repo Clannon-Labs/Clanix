@@ -1,3 +1,14 @@
+//! ExecutionRequest is the very first stage of running a process
+//! 
+//! You prepare a execution request, call .execute() and it hands you the
+//! ExecutionResult if the process didn't timeout, and no errors occured
+//! 
+//! But if the process timedout, it will give you a Timeout Error with the
+//! relevant information **Clanix** has by then.
+//! 
+//! Even though there isn't much information yet in the Timeout Error, in future
+//! I will gather more information and return a rich Error instance instead of just
+//! a plain error message
 
 use std::io::Read;
 use std::sync::mpsc;
@@ -105,9 +116,8 @@ impl ExecutionRequest {
         })
     }
 
-    /// It consumes the request after you call execute,
-    /// so you have to create a new request if you want
-    /// to call execute again
+    /// It takes a reference to the execution request, so you
+    /// can execute the same request as many times as you want
     pub(crate) fn execute(&self) -> Result<ExecutionResult> {
         /*
             * Change all the panic creating .expect()s with proper
@@ -246,7 +256,7 @@ impl ExecutionRequest {
         self
     }
 
-    // This is used to pass multiple arguments or a Vec< >
+    /// This is used to pass multiple arguments, Vec<> in this case
     pub fn args<I, S>(mut self, args: I) -> Self
         where
             I: IntoIterator<Item = S>,

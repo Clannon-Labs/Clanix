@@ -24,14 +24,24 @@ use serde::{Deserialize, Serialize};
 use clanix::{Detector, Environment};
 
 const NAME: &str = "Clanix";
+const CYBRO_GITHUB: &str = "https://github.com/thecybro";
 const REPO: &str = "https://github.com/Clannon-Labs/Clanix";
+const DOCS: &str = "https://docs.rs/clanix";
+const CRATE: &str = "https://crates.io/crates/clanix";
 
 #[derive(Parser, Debug)]
 #[command(name = "clanix")]
 #[command(version)]
 #[command(
-about = cformat!("<bold>{NAME}</> is a fast developer execution tool built by creator of <bold>Clannon Labs</>: <bold, underline>Cybro</>
-Visit <blue, underline>{REPO}</> to read the documents"
+about = cformat!("
+    
+<bold>{NAME}</> is a fast developer execution and observation tool;
+built by creator of <bold>Clannon Labs</>:- <bold, underline>Cybro</>.
+Official account: <blue, underline>{CYBRO_GITHUB}</> 
+    
+Visit <blue, underline>{REPO}</> to see the official repo
+Visit <blue, underline>{DOCS}</> to read the documents
+Visit <blue, underline>{CRATE}</> to know more about the crate/get it"
 ))]
 struct CliInput {
     /// The commands the user actually types

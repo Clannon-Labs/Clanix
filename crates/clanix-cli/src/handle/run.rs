@@ -1,4 +1,6 @@
-use clanix::Environment;
+use std::borrow::Cow;
+
+use clanix::{Environment, ExecutionOutput};
 use color_print::cformat;
 
 use crate::NAME;
@@ -32,49 +34,74 @@ pub fn handle_run(
 
     let args = args.join(" ");
 
-    let stdout_output = &result.stdout_string();
-    let stderr_output = &result.stderr_string();
+    let mut success = false;
+    let mut output_result = Cow::Borrowed("");
+    
+    match result.output() {
+        ExecutionOutput::Separate { stdout, stderr } => {
+            let stdout_output = String::from_utf8_lossy(stdout);
+            let stderr_output = String::from_utf8_lossy(stderr);
+        
+            // We display stdout incase of success and stderr incase of failure
+            // But some commands might run successfully but put the content in stderr
+            // so we check if there's anything on stderr incase we find stdout empty
+            // even incase of success
+            if result.success() {
+                output_result = if !stdout_output.trim().is_empty() {
+                    stdout_output
+                } else {
+                    stderr_output
+                };
 
-    // We display stdout incase of success and stderr incase of failure
-    // But some commands might run successfully but put the content in stderr
-    // so we check if there's anything on stderr incase we find stdout empty
-    // even incase of success
-    if result.success() {
-        let output = if !stdout_output.trim().is_empty() {
-            stdout_output
-        } else {
-            stderr_output
-        };
+                success = true;
+        
+                // let _ = environment.result_mut()?
+                // .set_stdout(message)?;
+            } else {
+                output_result = if !stderr_output.trim().is_empty() {
+                    stderr_output
+                } else {
+                    stdout_output
+                };
 
-        let final_output = output.clone().into_owned();
+                success = false;
+                
+                // let final_output = output.clone().into_owned();
+        
+                // let _ = environment.result_mut()?
+                // .set_stderr(final_output)?;
+            }
+        },
+        ExecutionOutput::Merged { output } => {
+            output_result = String::from_utf8_lossy(output);
 
+            // Marking success as true because until now, there's no way to actually
+            // know whether or not the process succeded
+            success = true;
+        },
+        ExecutionOutput::Terminal => {
+            // The process already interacted through the terminal session.
+            // Don't try to print output from the result again
+        },
+        _ => {}
+    };
+
+    let final_output = output_result.clone().into_owned();
+
+    if success {
         let label = cformat!("<bold><green>✔{NAME}</>");
         if verbose {
             println!("{label}\n\n{environment}");
         } else {
             println!("{label}  {program} {args} completed successfully.\n\n {final_output}\n");
         }
-
-        // let _ = environment.result_mut()?
-        // .set_stdout(message)?;
     } else {
-        let output = if !stderr_output.trim().is_empty() {
-            stderr_output
-        } else {
-            stdout_output
-        };
-
-        // let final_output = output.clone().into_owned();
-
         if verbose {
             println!("{environment}");
         } else {
             let label = cformat!("<bold><red> {NAME}</>");
-            println!("{label}  {program} {args} failed.\n\n {output}\n");
+            println!("{label}  {program} {args} failed.\n\n {output_result}\n");
         }
-
-        // let _ = environment.result_mut()?
-        // .set_stderr(final_output)?;
     }
 
     Ok(())

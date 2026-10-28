@@ -67,8 +67,8 @@ pub fn handle_config(
 
     let result = environment.result_mut()?;
 
-    let _ = result.set_success(true)?;
-    let _ = result.set_status(Some(101))?;
-    let _ = result.set_stderr("".to_string())?;
+    let _ = result.set_success(true);
+    let _ = result.set_status(Some(101));
+    result.set_stderr("".to_string())?;
     Ok(())
 }

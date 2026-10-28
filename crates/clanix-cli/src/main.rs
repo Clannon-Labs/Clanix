@@ -67,7 +67,7 @@ struct CliInput {
     #[arg(
         short,
         long,
-        help = "Use this flag to get a more detailed/verbose output from clanix"
+        help = "To get a more detailed/verbose output from clanix"
     )]
     verbose: bool,
 
@@ -87,7 +87,7 @@ struct CliInput {
         requires = "snapshot",
         value_enum,
         default_value_t = OutputFormat::Json,
-        help = "What format do you want your snapshots to be"
+        help = "The format you want your snapshots to be"
     )]
     output_format: OutputFormat,
 
@@ -98,7 +98,7 @@ struct CliInput {
     #[arg(
         long = "disable-timeout",
         visible_alias = "dt",
-        help = "Use this flag to disable the timeout you have saved; for one operation"
+        help = "To disable the timeout you have saved; for one operation"
     )]
     disable_timeout: bool,
 
@@ -111,14 +111,14 @@ struct CliInput {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// A basic command you can use to run something inside clanix
-    #[command(about = "A basic command you can use to run something inside clanix")]
+    #[command(about = "To run something inside clanix")]
     Run { program: String, args: Vec<String> },
 
     /// Just simulates test for now, we can put actual testing in future
-    #[command(about = "Just simulates test for now, we can put actual testing in future")]
+    #[command(about = "To test/run the tests in the project")]
     Test,
 
-    #[command(about = "Initialize the clanix project")]
+    #[command(about = "To initialize the clanix project")]
     Init,
 
     /// This detects what type of project are you running clanix on
@@ -126,7 +126,7 @@ enum Commands {
     /// Note that currently, it is not that useful as the detection mechanisms are very
     /// basic, but once those mechanisms are built properly, it can be quite useful
     /// for clanix to automate the tasks without requiring dog fooding from the user
-    #[command(about = "Detect what project it is")]
+    #[command(about = "To detect the type of the project")]
     What,
 
     /// To write some content to disk
@@ -138,7 +138,7 @@ enum Commands {
     ///
     /// Cli can just change the config for any one operation only
     /// unless you explicitly call the 'default' and 'set' commands
-    #[command(about = "Command to manage config. Run clanix config --help to get more info")]
+    #[command(about = "To manage config. Run clanix config --help to get more info")]
     Config {
         #[command(subcommand)]
         configcommand: ConfigCommands,

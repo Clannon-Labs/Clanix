@@ -19,3 +19,4 @@ thiserror.workspace = true
 
 uuid = { version = "1.26.1", features = ["v4", "serde"] }
 walkdir = "2.5.0"
+os_pipe = "1.2.3"

@@ -3,7 +3,7 @@ use std::ffi::OsString;
 
 use serde::Serialize;
 
-use crate::{Config, ExecutionRequest, ExecutionResult};
+use crate::{Config, ExecutionEvent, ExecutionRequest, ExecutionResult};
 use crate::Policy;
 use crate::ConfigBuilder;
 use crate::{Error, Result};
@@ -57,12 +57,39 @@ impl Environment {
 
     /// After creating an execution request (which is mandatory),
     /// execute it
-    pub fn execute_request(&mut self, request: ExecutionRequest) -> Result<()> {
-        let result = ExecutionRequest::execute(&request)?;
+    /// 
+    /// Note that this function immediately stores the request in the environment
+    /// before it executes it and executes the request from the request stored in 
+    /// the environment
+    /// 
+    /// This doesn't seem so different but if we were executing the request before storing 
+    /// to environment, then incase the execution fails, the environment would hold the older
+    /// request and result, which might make the clients think that the older request has failed
+    pub fn execute_request(&mut self, request: ExecutionRequest) -> Result<&ExecutionResult> {
         self.request = request;
+        let result = self.request.execute()?;
         self.result = Some(result);
 
-        Ok(())
+        self.result()
+    }
+
+    /// This method is also the same as the above, it too stores the request before it executes it
+    /// 
+    /// Since these methods are just wrappers around the actual executer methods, their behaviour is
+    /// identical
+    pub fn execute_request_with_events<F>(
+        &mut self, 
+        request: ExecutionRequest,
+        on_event: F
+    ) -> Result<&ExecutionResult> 
+        where 
+            F: FnMut(ExecutionEvent)
+    {
+        self.request = request;
+        let result = self.request.execute_with_events(on_event)?;
+        self.result = Some(result);
+
+        self.result()
     }
 
     /// Get the default result instance

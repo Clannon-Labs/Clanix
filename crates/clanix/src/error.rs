@@ -69,6 +69,15 @@ pub enum RequestError {
         source: std::io::Error
     },
 
+    #[error("failed to prepare merged output pipe: {0}")]
+    MergedPipe(#[source] std::io::Error),
+    
+    #[error("failed to read the output from the merged pipe: {0}")]
+    MergedRead(#[source] std::io::Error),
+
+    #[error("merged output reader thread panicked")]
+    Join,
+    
     #[error("child process did not provide a stdout stream!")]
     StdoutUnavailable,
 

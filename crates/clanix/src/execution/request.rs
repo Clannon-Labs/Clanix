@@ -22,7 +22,7 @@ use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 use crate::Policy;
 
-use super::ExecutionResult;
+use super::{ExecutionResult, ExecutionOutput};
 use crate::RequestError;
 use crate::Result;
 
@@ -118,11 +118,7 @@ impl ExecutionRequest {
 
     /// It takes a reference to the execution request, so you
     /// can execute the same request as many times as you want
-    pub(crate) fn execute(&self) -> Result<ExecutionResult> {
-        /*
-            * Change all the panic creating .expect()s with proper
-            * error handling later
-            */
+    pub fn execute(&self) -> Result<ExecutionResult> {
 
         let working_dir = &self.policy.working_dir();
         let timeout_s = self.policy.timeout_s();
@@ -245,8 +241,10 @@ impl ExecutionRequest {
             id,
             success: exit_status.success(),
             status: exit_status.code(),
-            stdout: captured_stdout,
-            stderr: captured_stderr,
+            output: ExecutionOutput::Separate{
+                stdout: captured_stdout,
+                stderr: captured_stderr,
+            },
             working_dir: self.policy.working_dir().to_path_buf()
         })
     }

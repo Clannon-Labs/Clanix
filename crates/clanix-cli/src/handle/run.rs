@@ -1,6 +1,7 @@
+use std::io::{self, Write};
 use std::borrow::Cow;
 
-use clanix::{Environment, ExecutionOutput};
+use clanix::{Environment, ExecutionOutput, ExecutionEvent};
 use color_print::cformat;
 
 use crate::NAME;
@@ -10,6 +11,8 @@ pub fn handle_run(
     environment: &mut Environment,
     program: String,
     args: Vec<String>,
+
+    stream: bool,
     verbose: bool,
     disable_timeout: bool,
     timeout: Option<u64>,
@@ -27,14 +30,44 @@ pub fn handle_run(
     // running the request outside of the environment will make the
     // request and error drift apart from the rest of the environment..
     //
-    let _ = environment.execute_request(request)?;
+    // let result = environment.execute_request(request)?.to_owned();
 
+    let mut error: Option<io::Error> = None;
+    
+    let result = if !stream {
+        environment.execute_request(request)?.to_owned()
+    } else {
+          environment.execute_request_with_events(request, |event| {
+              match event {
+                  #[allow(unused)]
+                  ExecutionEvent::Started { id } => {
+                      // We could later validate that clanix is giving us the
+                      // same id across the byte chunks
+                  },
+                  ExecutionEvent::Output { bytes, .. } => {
+                      // Write to stdout instead of printing
+                      if error.is_none() {
+                          let mut stdout = io::stdout().lock();
+
+                          if let Err(err) = stdout.write_all(&bytes)
+                              .and_then(|()| stdout.flush()) {
+                                  error = Some(err);
+                              }
+                      }                 
+                  }
+              }
+          })?.to_owned()
+    };
+
+    if let Some(err) = error {
+        return Err(err.into());
+    }
+    
     // Get the result from the environment and replace the old default result
-    let result = environment.result()?.to_owned();
+    // let result = environment.result()?.to_owned();
 
     let args = args.join(" ");
 
-    let mut success = false;
     let mut output_result = Cow::Borrowed("");
     
     match result.output() {
@@ -52,8 +85,6 @@ pub fn handle_run(
                 } else {
                     stderr_output
                 };
-
-                success = true;
         
                 // let _ = environment.result_mut()?
                 // .set_stdout(message)?;
@@ -63,8 +94,6 @@ pub fn handle_run(
                 } else {
                     stdout_output
                 };
-
-                success = false;
                 
                 // let final_output = output.clone().into_owned();
         
@@ -72,23 +101,22 @@ pub fn handle_run(
                 // .set_stderr(final_output)?;
             }
         },
-        ExecutionOutput::Merged { output } => {
-            output_result = String::from_utf8_lossy(output);
+        ExecutionOutput::Merged { .. } => {
+            // The output has already been printed to the terminal, no
+            // need to print it again
 
-            // Marking success as true because until now, there's no way to actually
-            // know whether or not the process succeded
-            success = true;
         },
         ExecutionOutput::Terminal => {
             // The process already interacted through the terminal session.
             // Don't try to print output from the result again
+
         },
         _ => {}
     };
 
     let final_output = output_result.clone().into_owned();
 
-    if success {
+    if result.success() {
         let label = cformat!("<bold><green>✔{NAME}</>");
         if verbose {
             println!("{label}\n\n{environment}");

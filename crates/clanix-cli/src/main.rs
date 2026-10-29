@@ -71,6 +71,10 @@ struct CliInput {
     )]
     verbose: bool,
 
+    
+    #[arg(long, help="To get the output/stream of any process immediately")]
+    stream: bool,
+    
     /// Whether or not user wants to save/snapshot the output to a file
     #[arg(
         short,
@@ -92,9 +96,10 @@ struct CliInput {
     output_format: OutputFormat,
 
     /// To disable timeout for any one operation
-    /// You can use --dt true to disable whatever timeout you had set
-    /// And you can use --dt false to enable (or not disable) the timeout
-    /// you have
+    /// 
+    /// This currently has a limitation, if your timeout is already disabled
+    /// in the config, you have to set the persistent config manually to 
+    /// make it timeout_disabled: false or timeout_enabled: true
     #[arg(
         long = "disable-timeout",
         visible_alias = "dt",
@@ -112,7 +117,12 @@ struct CliInput {
 enum Commands {
     /// A basic command you can use to run something inside clanix
     #[command(about = "To run something inside clanix")]
-    Run { program: String, args: Vec<String> },
+    Run {
+
+        program: String,
+
+        args: Vec<String>,
+    },
 
     /// Just simulates test for now, we can put actual testing in future
     #[command(about = "To test/run the tests in the project")]
@@ -222,6 +232,7 @@ fn clanix_cli() -> Result<(), Error> {
     let CliInput {
         command,
         verbose,
+        stream,
         snapshot,
         output_format,
         timeout,
@@ -233,11 +244,14 @@ fn clanix_cli() -> Result<(), Error> {
     let mut environment = Environment::new()?;
 
     match command {
-        Commands::Run { program, args } => {
+        Commands::Run { program, args} => {
             let _ = run::handle_run(
                 &mut environment,
                 program,
                 args,
+
+                stream,
+                
                 verbose,
                 disable_timeout,
                 timeout,

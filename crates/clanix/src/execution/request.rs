@@ -573,29 +573,58 @@ impl ExecutionRequest {
         
         let mut captured_stdout: Vec<u8> = Vec::new();
         let mut captured_stderr: Vec<u8> = Vec::new();
+
+        let mut child_status = None;
+        let mut reader_done = false;
         
         // keep checking the incoming (non blocking) bytes in loop
-        loop {
-            let elapsed_time = start_time.elapsed();
-            // if the process has ran for already over the timeout,
-            // kill it before you do anything else
-            // println!("About to check disable_timeout: {} and timeout_s: {:?}", disable_timeout, timeout_s);
-            if (disable_timeout == false) && elapsed_time >= timeout_s {
-                child.kill()
-                    .map_err(|e| RequestError::Kill(e))?;
+        // to get the exit_status of the child, which will definetely be Some()
+        // if the loop has exited
+        let exit_status = loop {
+            // If the child status is None, then it means when it was last checked
+            // it hadn't exited,
+            // 
+            // See if it has now and if it has, set the status which will cause the 
+            // child_status check later to break with the status (if reader is done as well)
+            if child_status.is_none() {
+                match child.try_wait() {
+                    Ok(status) => child_status = status,
+                    Err(status_error) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
 
-                // Propagate the error message instead of printing to terminal
-                // 
-                // But that would return too early and wont let us prepare the crash report later,
-                // So prepare a rich status report here and return Err()
-                return Err(
-                    RequestError::Timeout {
-                    id,
-                    elapsed_time,
-                    timeout: timeout_s,
-                    working_dir: self.policy.working_dir().to_path_buf()
-                }.into());
-                // break;
+                        return Err(RequestError::StatusError(status_error).into());
+                    }
+                }
+            }
+
+            // Break with the status if we have the status and the reader is done
+            if let (Some(status), true) = (child_status, reader_done) {
+                break status;
+            }
+
+            if child_status.is_none() && !self.policy.disable_timeout() {
+                let elapsed_time = start_time.elapsed();
+                let timeout = self.policy.timeout_s();
+
+                // if the process has ran for already over the timeout,
+                // kill it before you do anything else
+                if elapsed_time >= timeout {
+                    child.kill()
+                        .map_err(|e| RequestError::Kill(e))?;
+    
+                    // Propagate the error message instead of printing to terminal
+                    // 
+                    // But that would return too early and wont let us prepare the crash report later,
+                    // So prepare a rich status report here and return Err()
+                    return Err(
+                        RequestError::Timeout {
+                        id,
+                        elapsed_time,
+                        timeout: timeout_s,
+                        working_dir: self.policy.working_dir().to_path_buf()
+                    }.into());
+                }
             }
 
             match rx.try_recv() {
@@ -622,22 +651,11 @@ impl ExecutionRequest {
                     // We just know that both the stdout/stderr reader threads have dropped their senders
 
                     // EOF maybe??
-                    
-                    break;
+                    reader_done = true;
+                    // break;
                 }
             }
-        }
-
-        // Wait till the child finishes and get its exit status
-        let exit_status = child.wait()
-            .map_err(RequestError::StatusError)?;
-
-        // Now we dont need this because we are reading both stdout/stderr concurrently
-        //
-        // // Read the stderr if there is any
-        // let mut captured_stderr: Vec<u8> = Vec::new();
-        // stderr_stream.read_to_end(&mut captured_stderr)
-        //     .map_err(|e| RequestError::StderrRead(e))?;
+        };
 
         Ok(ExecutionResult {
             id,

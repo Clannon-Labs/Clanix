@@ -15,6 +15,7 @@ use std::sync::mpsc;
 use std::path::PathBuf;
 use std::ffi::OsString;
 use std::process::{Command, Stdio};
+use std::thread;
 use std::time::{Instant, Duration};
 
 use uuid::Uuid;
@@ -215,7 +216,7 @@ impl ExecutionRequest {
             // Rust starts a new thread here and immediately gives the main thead a JoinHandle
             // stores in reader_threadthat the main thread (where the code above/below is running)
             // which it can use to inspect reader thread without blocking or being blocked
-            let reader_thread = std::thread::spawn(move || {
+            let reader_thread = thread::spawn(move || {
                 // Reader is moved into the thread because only that thread
                 // is supposed to read from the pipe
                 let mut reader = reader;
@@ -344,26 +345,22 @@ impl ExecutionRequest {
                         // 
                         // This terminates the process and moves it into a zombie state until the parent 
                         // that launched it; acknowledges its death
-                        child.kill()
-                            .map_err(RequestError::Kill)?;
-
+                        let _ = child.kill();
+                        
                         // Reap the killed child and give all its resources back to the OS, this removes
                         // it from the zombie state and wipes it out
                         // 
                         // We dont use its exit status cuz 
                         // if we have reached here, then it means we have to return a
                         // Timeout error, not proceed forward
-                        child.wait()
-                            .map_err(RequestError::StatusError)?;
+                        let _ = child.wait();
                         
                         // .join() returns immediately if the thread has already finished
                         // But we dont need it's result here cuz we already have got it,
                         // so we discard it
                         // 
                         // And if it has not, this will fully wait for the thread to finish,
-                        reader_thread
-                        .join()
-                        .map_err(|_| RequestError::Join)?;
+                        let _ = reader_thread.join();
 
                         // Timed out, so return the error
                         return Err(RequestError::Timeout {
@@ -382,7 +379,7 @@ impl ExecutionRequest {
                 // This is the signal that we can exit now, we dont try to read again 
                 // after it
                 if reader_done {
-                    std::thread::sleep(poll_interval);
+                    thread::sleep(poll_interval);
                     continue;
                 }
 
@@ -398,18 +395,11 @@ impl ExecutionRequest {
                         on_event(ExecutionEvent::Output { id, bytes });
                     },
                     Ok(Err(error)) => {   
-                        // Error occured, so terminate/kill the child process
-                        child.kill()
-                            .map_err(|e| RequestError::Kill(e))?;
+                        // Since we already have the error prepared, we just attempt a last cleanup
 
-                        // Let the child finish and get the exit status
-                        child.wait()
-                            .map_err(RequestError::StatusError)?;
-                        
-                        // Let the thread finish before we return the error (Ok() value discarded)
-                        reader_thread
-                            .join()
-                            .map_err(|_| RequestError::Join)?;
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        let _ = reader_thread.join();
                         
                         return Err(RequestError::MergedRead(error).into())
                     },
@@ -514,7 +504,7 @@ impl ExecutionRequest {
         // 
         // We make a thread for each because putting them into a single thread will
         // block the other while one's bytes are being read 
-        let stdout_reader_thread = std::thread::spawn(move || {
+        let stdout_reader_thread = thread::spawn(move || {
             let mut buffer = [0u8; 1024];
 
             loop {
@@ -544,7 +534,7 @@ impl ExecutionRequest {
         });
 
         // Spawn a thread to read data from child's stderr pipe then send it to the channel
-        let stderr_reader_thread = std::thread::spawn(move || {
+        let stderr_reader_thread = thread::spawn(move || {
             let mut buffer = [0u8; 1024];
 
             loop {
@@ -590,6 +580,10 @@ impl ExecutionRequest {
                 match child.try_wait() {
                     Ok(status) => child_status = status,
                     Err(status_error) => {
+                        // Here, we just attempt a cleanup before returning the error because we
+                        // dont want to stop the cleanup if either of the step fails cuz it's 
+                        // just our last cleanup attempt, not which must pass
+                        
                         // Kill the child process
                         let _ = child.kill();
 
@@ -617,20 +611,13 @@ impl ExecutionRequest {
                 // if the process has ran for already over the timeout,
                 // kill it before you do anything else
                 if elapsed_time >= timeout {
-                    child.kill()
-                        .map_err(|e| RequestError::Kill(e))?;
+                    // Attempt a last cleanup and discard their values because we already have our error we 
+                    // are trying to return
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_reader_thread.join();
+                    let _ = stderr_reader_thread.join();
 
-                    child.wait()
-                        .map_err(RequestError::StatusError)?;
-
-                    stdout_reader_thread
-                        .join()
-                        .map_err(|_| RequestError::Join)?;
-
-                    stderr_reader_thread
-                        .join()
-                        .map_err(|_| RequestError::Join)?;
-                    
                     // Propagate the error message instead of printing to terminal
                     // 
                     // But that would return too early and wont let us prepare the crash report later,
@@ -655,15 +642,39 @@ impl ExecutionRequest {
                 // 
                 // We take appropriate action based on that
                 Ok(OutputMessage::Stdout(Ok(stdout_bytes))) => captured_stdout.extend(stdout_bytes),
-                Ok(OutputMessage::Stdout(Err(stdout_error))) => return Err(RequestError::StdoutRead(stdout_error).into()),
+                Ok(OutputMessage::Stdout(Err(stdout_error))) => {
+                    // Attempt a full cleanup before returning an error so we dont accidently leave
+                    // any zombie/stale process after we exit from the function
+                    // 
+                    // And since we can't do the cleanup until the whole clanix process exits
+                    // the stale processes will dangle throughout
+                    // 
+                    // We deliberately discard the values returned by the cleanup steps cuz we already
+                    // have prepared the error we are trying to return, we dont want to return the errors 
+                    // of the cleanup attempts here
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_reader_thread.join();
+                    let _ = stderr_reader_thread.join();
+
+                    return Err(RequestError::StdoutRead(stdout_error).into())
+                },
                 
                 Ok(OutputMessage::Stderr(Ok(stderr_bytes))) => captured_stderr.extend(stderr_bytes),
-                Ok(OutputMessage::Stderr(Err(stderr_error))) => return Err(RequestError::StderrRead(stderr_error).into()),
+                Ok(OutputMessage::Stderr(Err(stderr_error))) => {
+                    // Attempt a cleanup but discard the values
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_reader_thread.join();
+                    let _ = stderr_reader_thread.join();
+
+                    return Err(RequestError::StderrRead(stderr_error).into())
+                },
                     
                 Err(mpsc::TryRecvError::Empty) => {
                     // No bytes to read
                     // So sleep for 100 micro s and check again
-                    std::thread::sleep(Duration::from_micros(100))
+                    thread::sleep(Duration::from_micros(100))
                 },
                 Err(mpsc::TryRecvError::Disconnected) => {
                     // We just know that both the stdout/stderr reader threads have dropped their senders
@@ -675,6 +686,19 @@ impl ExecutionRequest {
             }
         };
 
+        // Join the reader threads one last time to make sure they have completed the job
+        // 
+        // And now that we are no more checking for anything, we must ensure all the process
+        // has exited, and since we are preparing an Ok() return now, we must keep everything clean
+        // so we error out if some processes can't be joined/completed
+        stdout_reader_thread
+            .join()
+            .map_err(|_| RequestError::Join)?;
+
+        stderr_reader_thread
+            .join()
+            .map_err(|_| RequestError::Join)?;
+        
         Ok(ExecutionResult {
             id,
             success: exit_status.success(),

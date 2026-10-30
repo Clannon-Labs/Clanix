@@ -460,7 +460,7 @@ impl ExecutionRequest {
 
         let working_dir = &self.policy.working_dir();
         let timeout_s = self.policy.timeout_s();
-        let disable_timeout = self.policy.disable_timeout();
+        // let disable_timeout = self.policy.disable_timeout();
 
         // println!("Current working directory is {:?}", &working_dir);
         // println!("Timeout_s: {:?}", timeout_s);
@@ -514,7 +514,7 @@ impl ExecutionRequest {
         // 
         // We make a thread for each because putting them into a single thread will
         // block the other while one's bytes are being read 
-        std::thread::spawn(move || {
+        let stdout_reader_thread = std::thread::spawn(move || {
             let mut buffer = [0u8; 1024];
 
             loop {
@@ -544,7 +544,7 @@ impl ExecutionRequest {
         });
 
         // Spawn a thread to read data from child's stderr pipe then send it to the channel
-        std::thread::spawn(move || {
+        let stderr_reader_thread = std::thread::spawn(move || {
             let mut buffer = [0u8; 1024];
 
             loop {
@@ -590,8 +590,15 @@ impl ExecutionRequest {
                 match child.try_wait() {
                     Ok(status) => child_status = status,
                     Err(status_error) => {
+                        // Kill the child process
                         let _ = child.kill();
+
+                        // Take all the resources and erase child process completely
                         let _ = child.wait();
+
+                        // Join the stdout/stderr handles and finish their readers
+                        let _ = stdout_reader_thread.join();
+                        let _ = stderr_reader_thread.join();
 
                         return Err(RequestError::StatusError(status_error).into());
                     }
@@ -612,7 +619,18 @@ impl ExecutionRequest {
                 if elapsed_time >= timeout {
                     child.kill()
                         .map_err(|e| RequestError::Kill(e))?;
-    
+
+                    child.wait()
+                        .map_err(RequestError::StatusError)?;
+
+                    stdout_reader_thread
+                        .join()
+                        .map_err(|_| RequestError::Join)?;
+
+                    stderr_reader_thread
+                        .join()
+                        .map_err(|_| RequestError::Join)?;
+                    
                     // Propagate the error message instead of printing to terminal
                     // 
                     // But that would return too early and wont let us prepare the crash report later,

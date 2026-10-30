@@ -210,12 +210,13 @@ impl ExecutionRequest {
             // Spawn a thread where the reader can keep reading bytes and send the
             // bytes over to our main thread over the channel (which has rx as the receiver)
             // 
-            // This allows the reader to keep reading without blocking our main thread
-            // that is continuously inspecting the reader thread
-            
-            // Rust starts a new thread here and immediately gives the main thead a JoinHandle
-            // stores in reader_threadthat the main thread (where the code above/below is running)
-            // which it can use to inspect reader thread without blocking or being blocked
+            // This keeps giving reader the messages through the channel which it can use
+            // to inspect, block, kill, join the reader thread etc
+
+            // spawn() starts the reader on another thread and returns a JoinHandle
+            // and the reader can block on pipe reads without blocking the main thread
+            // 
+            // The handle it gets can later be joined to wait for completion and detect panics
             let reader_thread = thread::spawn(move || {
                 // Reader is moved into the thread because only that thread
                 // is supposed to read from the pipe
@@ -235,6 +236,10 @@ impl ExecutionRequest {
                     // it 0 bytes
                     match reader.read(&mut buffer) {
                         // Got 0 bytes, so maybe the reader has finished reading??
+                        // 
+                        // It definitely means EOF and the pipe has closed, and that's the reason
+                        // no bytes were remaining; hence we getting 0 of them
+                        // 
                         // So we dont need to read anymore, so break the loop
                         Ok(0) => break,
 
@@ -646,8 +651,8 @@ impl ExecutionRequest {
                     // Attempt a full cleanup before returning an error so we dont accidently leave
                     // any zombie/stale process after we exit from the function
                     // 
-                    // And since we can't do the cleanup until the whole clanix process exits
-                    // the stale processes will dangle throughout
+                    // And since we can't do the cleanup after this function returns
+                    // the stale processes will dangle throughout the clanix process
                     // 
                     // We deliberately discard the values returned by the cleanup steps cuz we already
                     // have prepared the error we are trying to return, we dont want to return the errors 

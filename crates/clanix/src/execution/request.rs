@@ -575,7 +575,7 @@ impl ExecutionRequest {
         let mut captured_stderr: Vec<u8> = Vec::new();
 
         let mut child_status = None;
-        let mut reader_done = false;
+        let mut readers_done = false;
         
         // keep checking the incoming (non blocking) bytes in loop
         // to get the exit_status of the child, which will definetely be Some()
@@ -606,7 +606,7 @@ impl ExecutionRequest {
             }
 
             // Break with the status if we have the status and the reader is done
-            if let (Some(status), true) = (child_status, reader_done) {
+            if let (Some(status), true) = (child_status, readers_done) {
                 break status;
             }
 
@@ -669,7 +669,7 @@ impl ExecutionRequest {
                     // We just know that both the stdout/stderr reader threads have dropped their senders
 
                     // EOF maybe??
-                    reader_done = true;
+                    readers_done = true;
                     // break;
                 }
             }

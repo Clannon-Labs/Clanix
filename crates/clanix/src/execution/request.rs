@@ -159,7 +159,7 @@ impl ExecutionRequest {
         where 
             F: FnMut(ExecutionEvent),
         {
-            // Ask the OS for a conncted reader/writer pair where the
+            // Ask the OS for a connected reader/writer pair where the
             // bytes written in stdout_writer can be read from the reader
             let (reader, stdout_writer) =
                 os_pipe::pipe().map_err(RequestError::MergedPipe)?;
@@ -200,22 +200,53 @@ impl ExecutionRequest {
                     source,
                 })?;
 
-            let id = Uuid::new_v4();
             let start_time = Instant::now();
+            let id = Uuid::new_v4();
 
             // Channel to transmit & receive the bytes
             let (tx, rx) = mpsc::channel::<std::io::Result<Vec<u8>>>();
 
-            // Reader is moved into the thread because only that thread
-            // is supposed to read from the pipe
+            // Spawn a thread where the reader can keep reading bytes and send the
+            // bytes over to our main thread over the channel (which has rx as the receiver)
+            // 
+            // This allows the reader to keep reading without blocking our main thread
+            // that is continuously inspecting the reader thread
+            
+            // Rust starts a new thread here and immediately gives the main thead a JoinHandle
+            // stores in reader_threadthat the main thread (where the code above/below is running)
+            // which it can use to inspect reader thread without blocking or being blocked
             let reader_thread = std::thread::spawn(move || {
+                // Reader is moved into the thread because only that thread
+                // is supposed to read from the pipe
                 let mut reader = reader;
-                let mut buffer = [0u8; 1024];
 
+                // A buffer we read into before sending the bytes
+                // 
+                // This allows us to know what we have read and act based on it
+                // (see the tx.send() line on Ok(bytes_read) block below)
+                let mut buffer = [0u8; 1024]; 
+
+                // Create an infinite loop to keep reading the bytes as they come
                 loop {
+                    // Try to read from the reader into our buffer
+                    // This is a blocking operation which will wait/block until it
+                    // reads the bytes from the reader, even if the reader gives
+                    // it 0 bytes
                     match reader.read(&mut buffer) {
+                        // Got 0 bytes, so maybe the reader has finished reading??
+                        // So we dont need to read anymore, so break the loop
                         Ok(0) => break,
+
+                        // We read some bytes, try sending it to the reader pipe
                         Ok(bytes_read) => {
+                            // Try to send the bytes wrapped in Ok()
+                            // But from the buffer we read to, send only the bytes which 
+                            // we read this time, by copying them to a vector
+                            // 
+                            // But if this operation fails, break out of the loop
+                            // Because the job of the reader thread is to read and send the bytes
+                            // and if it can't to that, it should exit instead of running forever
+                            // trying to do it everytime
                             if tx.send(
                                 Ok(buffer[..bytes_read].to_vec())
                             ).is_err()
@@ -223,6 +254,8 @@ impl ExecutionRequest {
                                 break;
                             }
                         },
+                        // Couldn't read from the reader, report error to the receiver
+                        // and exit the loop
                         Err(error) => {
                             let _ = tx.send(Err(error));
                             break;
@@ -246,6 +279,8 @@ impl ExecutionRequest {
             let mut captured_output = Vec::new();
             
             let exit_status = loop {
+                // The child_status being none means the child is still running, so we check it's status
+                // again (without blocking) to see if it has exited now
                 if child_status.is_none() {
                     // .try_wait() is a non-blocking operation that checks
                     // if the child process has completed the execution 
@@ -258,10 +293,18 @@ impl ExecutionRequest {
                     // We will get error if an error occured while quering the system for the status,
                     // which will return an Error
                     match child.try_wait() {
+                        // We have gotten a Ok() meaning either the child process has finished (Ok(Some(T))) or is
+                        // still running (Ok(None))
+                        // 
+                        // We put that Some() or None from inside Ok() to child_status variable which the code later
+                        // on can use to determine whether we should continue or this loop should be exited 
                         Ok(status) => child_status = status,
                         Err(status_error) => {
                             // We try our best to clean things up before returning the original error we got
                             // from try_wait()
+                            // 
+                            // We intentionally ignore errors here because it's just our last effort in cleaning
+                            // things up, we can't/don't need to do anything with the values returned by these
                             let _ = child.kill();
                             let _ = child.wait();
                             let _ = reader_thread.join();
@@ -278,9 +321,9 @@ impl ExecutionRequest {
                 }
 
                 // See if we have the child_status, which will be Some() only when the 
-                // child has finished the execution
+                // child has finished the execution and the reader is done as well
+                // which happens when the receiver has Disconnected
                 if let (Some(status), true) = (child_status, reader_done) {
-                    // We break only when the reader had done reading,
                     // we return the status so the code executing after the loop
                     // can use that status, eg; to return it in ExecutionResult
                     break status;
@@ -297,11 +340,17 @@ impl ExecutionRequest {
 
                     // Timeout has matched/exceeded our timeout threshold
                     if elapsed_time >= timeout {
-                        // Kill the child process
+                        // Kill the child process cuz it has matched/exceeded our timeout threshold
+                        // 
+                        // This terminates the process and moves it into a zombie state until the parent 
+                        // that launched it; acknowledges its death
                         child.kill()
                             .map_err(RequestError::Kill)?;
 
-                        // Reap the killed child and we dont use its exit sttus cuz 
+                        // Reap the killed child and give all its resources back to the OS, this removes
+                        // it from the zombie state and wipes it out
+                        // 
+                        // We dont use its exit status cuz 
                         // if we have reached here, then it means we have to return a
                         // Timeout error, not proceed forward
                         child.wait()
@@ -326,8 +375,12 @@ impl ExecutionRequest {
                     }
                 }
 
-                // Reader is done meaning we have read the bytes, so sleep for poll_interval time and 
-                // jump back to the top so it can get the status ()
+                // Reader is done (means it has disconnected, see lhe Disconnected block)
+                // meaning we have read the bytes, so sleep for poll_interval time and 
+                // jump back to the top so it can get the status () and exit the loop
+                // 
+                // This is the signal that we can exit now, we dont try to read again 
+                // after it
                 if reader_done {
                     std::thread::sleep(poll_interval);
                     continue;
@@ -575,6 +628,7 @@ impl ExecutionRequest {
             }
         }
 
+        // Wait till the child finishes and get its exit status
         let exit_status = child.wait()
             .map_err(RequestError::StatusError)?;
 

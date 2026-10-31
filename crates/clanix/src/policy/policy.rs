@@ -10,7 +10,7 @@ use crate::PolicyError;
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Policy {
     pub(crate) disable_timeout: bool,
-    pub(crate) timeout_s: Duration,
+    pub(crate) timeout: Duration,
     pub(crate) working_dir: PathBuf,
 }
 
@@ -20,7 +20,7 @@ impl std::fmt::Display for Policy {
         writeln!(f, "-------\n")?;
         writeln!(f, "Disable timeout? {}", self.disable_timeout)?;
 
-        writeln!(f, "Timeout seconds: {:?}", self.timeout_s)?;
+        writeln!(f, "Timeout seconds: {:?}", self.timeout)?;
 
         writeln!(f, "\nWorking directory: {}\n", self.working_dir.display())?;
         
@@ -39,7 +39,7 @@ impl Policy {
     pub fn default() -> Result<Self> {
         Ok(Self {
             disable_timeout: Config::default_disable_timeout(),
-            timeout_s: Config::default_timeout_s(),
+            timeout: Config::default_timeout(),
             working_dir: Config::default_working_dir()?,
         })
     }
@@ -50,8 +50,8 @@ impl Policy {
     }
 
 
-    pub fn timeout_s(&self) -> Duration {
-        self.timeout_s
+    pub fn timeout(&self) -> Duration {
+        self.timeout
     }
     
     pub fn disable_timeout(&self) -> bool {
@@ -63,19 +63,19 @@ impl Policy {
     }
 
     ///
-    /// If user gives the timeout_s, which makes timeout_s: Some(),
-    /// set the timeout_s for now to that.
-    /// If not, read the timeout_s from config and set the
-    /// timeout_s to that
+    /// If user gives the timeout, which makes timeout: Some(),
+    /// set the timeout for now to that.
+    /// If not, read the timeout from config and set the
+    /// timeout to that
     ///
-    pub fn set_timeout_s(mut self, timeout_s: Option<u64>) -> Result<Self> {
-        match timeout_s {
-            Some(secs) => {
-                self.timeout_s = Duration::from_secs(secs);
+    pub fn set_timeout(mut self, timeout: Option<Duration>) -> Result<Self> {
+        match timeout {
+            Some(time) => {
+                self.timeout = time;
                 return Ok(self)
             },
             None => {
-                self.timeout_s = Config::read()?.timeout_s();
+                self.timeout = Config::read()?.timeout();
                 return Ok(self)
             }
         }

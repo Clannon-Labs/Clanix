@@ -23,7 +23,7 @@ pub fn handle_config(
         ConfigCommands::Set {
             default,
             disable_timeout,
-            timeout_s,
+            timeout,
             working_dir,
         } => {
             if default {
@@ -31,7 +31,7 @@ pub fn handle_config(
             } else {
                 let _ = Config::read()?
                     .set_disable_timeout(disable_timeout)?
-                    .set_timeout_s(timeout_s)?
+                    .set_timeout(timeout)?
                     .set_working_dir(working_dir);
             }
 
@@ -47,15 +47,15 @@ pub fn handle_config(
         }
         ConfigCommands::What {
             disable_timeout,
-            timeout_s,
+            timeout,
             working_dir,
         } => {
             let config = Config::read()?;
 
             if disable_timeout {
                 println!("{}", config.disable_timeout())
-            } else if timeout_s {
-                println!("{:?}", config.timeout_s())
+            } else if timeout {
+                println!("{:?}", config.timeout())
             } else if working_dir {
                 println!("{}", config.working_dir().display())
             } else {

@@ -342,7 +342,7 @@ impl ExecutionRequest {
                 // our timeout threshold
                 if child_status.is_none() && !self.policy.disable_timeout() {                
                     let elapsed_time = start_time.elapsed();
-                    let timeout = self.policy.timeout_s();
+                    let timeout = self.policy.timeout();
 
                     // Timeout has matched/exceeded our timeout threshold
                     if elapsed_time >= timeout {
@@ -454,11 +454,11 @@ impl ExecutionRequest {
     pub fn execute(&self) -> Result<ExecutionResult> {
 
         let working_dir = &self.policy.working_dir();
-        let timeout_s = self.policy.timeout_s();
+        // let timeout = self.policy.timeout();
         // let disable_timeout = self.policy.disable_timeout();
 
         // println!("Current working directory is {:?}", &working_dir);
-        // println!("Timeout_s: {:?}", timeout_s);
+        // println!("Timeout: {:?}", timeout);
         // println!("Timeout disable: {}", disable_timeout);
         // println!("Executing: {self:#?}");
 
@@ -611,7 +611,7 @@ impl ExecutionRequest {
 
             if child_status.is_none() && !self.policy.disable_timeout() {
                 let elapsed_time = start_time.elapsed();
-                let timeout = self.policy.timeout_s();
+                let timeout = self.policy.timeout();
 
                 // if the process has ran for already over the timeout,
                 // kill it before you do anything else
@@ -631,7 +631,7 @@ impl ExecutionRequest {
                         RequestError::Timeout {
                         id,
                         elapsed_time,
-                        timeout: timeout_s,
+                        timeout,
                         working_dir: self.policy.working_dir().to_path_buf()
                     }.into());
                 }
@@ -745,8 +745,8 @@ impl ExecutionRequest {
     /// the individual policy key
     /// These functions are for setting the individual
     /// policy keys
-    pub fn set_timeout_s(mut self, timeout_s: Option<u64>) -> Result<Self> {
-        self.policy = Policy::set_timeout_s(self.policy, timeout_s)?;
+    pub fn set_timeout(mut self, timeout: Option<Duration>) -> Result<Self> {
+        self.policy = Policy::set_timeout(self.policy, timeout)?;
         Ok(self)
     }
 

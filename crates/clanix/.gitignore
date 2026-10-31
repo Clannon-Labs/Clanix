@@ -1,0 +1,6 @@
+
+# Sample created to help in tests
+/samples/
+
+# Temporary artifacts created while testing and other tasks
+/temp/

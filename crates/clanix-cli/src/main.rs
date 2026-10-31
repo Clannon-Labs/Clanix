@@ -16,10 +16,12 @@ use crate::error::Error;
 use handle::*;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use color_print::cformat;
 use serde::{Deserialize, Serialize};
+use humantime;
 
 use clanix::{Detector, Environment};
 
@@ -108,8 +110,14 @@ struct CliInput {
     disable_timeout: bool,
 
     /// The actual timeout you want to set
-    #[arg(short, long, help = "The actual timeout you want to set(in seconds)")]
-    timeout: Option<u64>,
+    #[arg(
+        short,
+        long,
+        value_parser = parse_strict_timeout,
+        default_value = "30s",
+
+        help = "The actual timeout you want to set")]
+    timeout: Option<Duration>,
 }
 
 /// The commands available to use
@@ -172,9 +180,15 @@ enum ConfigCommands {
         )]
         disable_timeout: Option<bool>,
 
-        /// Change/set the config value stored in timeout_s
-        #[arg(short, long, help = "Change/set the config value stored in timeout_s")]
-        timeout_s: Option<u64>,
+        /// Change/set the config value stored in timeout
+        #[arg(
+            short,
+            long,
+            value_parser = parse_strict_timeout,
+            default_value = "30s",
+            
+            help = "Change/set the config value stored in timeout")]
+        timeout: Option<Duration>,
 
         /// Change/set the config value stored in working_dir
         #[arg(
@@ -196,9 +210,9 @@ enum ConfigCommands {
         )]
         disable_timeout: bool,
 
-        /// Get the config value stored in timeout_s
-        #[arg(short, long, help = "Get the config value stored in timeout_s")]
-        timeout_s: bool,
+        /// Get the config value stored in timeout
+        #[arg(short, long, help = "Get the config value stored in timeout")]
+        timeout: bool,
 
         /// Get the config value stored in working_dir
         #[arg(
@@ -218,6 +232,26 @@ enum OutputFormat {
     Json,
     Toml,
 }
+
+fn parse_strict_timeout(arg: &str) -> Result<Duration, String> {
+    let trimmed = arg.trim();
+
+    if trimmed.chars().all(|c| c.is_ascii_digit()) {
+        let secs = trimmed
+            .parse::<u64>()
+            .map_err(|e| format!("Invalid number: {}", e))?;
+
+        return Ok(Duration::from_secs(secs));
+    }
+
+    humantime::parse_duration(trimmed).map_err(|_| {
+        format!(
+            "Invalid time format '{}'. Use suffixes h, m, s, ms, ns, us natively",
+            arg
+        )
+    })
+}
+
 
 fn main() {
     if let Err(err) = clanix_cli() {

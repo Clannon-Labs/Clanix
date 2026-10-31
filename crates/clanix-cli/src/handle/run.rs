@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 use std::borrow::Cow;
+use std::time::Duration;
 
 use clanix::{Environment, ExecutionOutput, ExecutionEvent};
 use color_print::cformat;
@@ -15,7 +16,7 @@ pub fn handle_run(
     stream: bool,
     verbose: bool,
     disable_timeout: bool,
-    timeout: Option<u64>,
+    timeout: Option<Duration>,
     working_dir: Option<std::path::PathBuf>,
 ) -> Result<()> {
     // Run in that environment with these arguments
@@ -23,7 +24,7 @@ pub fn handle_run(
         .new_request(&program)?
         .args(&args)
         .set_disable_timeout(disable_timeout)?
-        .set_timeout_s(timeout)?
+        .set_timeout(timeout)?
         .set_working_dir(working_dir)?;
 
     // IMPORTANT: Execute the request in that environment because

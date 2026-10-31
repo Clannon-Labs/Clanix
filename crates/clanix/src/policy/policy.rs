@@ -68,17 +68,9 @@ impl Policy {
     /// If not, read the timeout from config and set the
     /// timeout to that
     ///
-    pub fn set_timeout(mut self, timeout: Option<Duration>) -> Result<Self> {
-        match timeout {
-            Some(time) => {
-                self.timeout = time;
-                return Ok(self)
-            },
-            None => {
-                self.timeout = Config::read()?.timeout();
-                return Ok(self)
-            }
-        }
+    pub fn set_timeout(&mut self, timeout: Duration) -> &Self {
+        self.timeout = timeout;
+        self
     }
 
     ///
@@ -87,17 +79,9 @@ impl Policy {
     /// If not, read the working_dir from config and set the
     /// working_dir to that
     ///
-    pub fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Result<Self> {
-        match working_dir {
-            Some(dir) => {
-                self.working_dir = dir;
-                return Ok(self)
-            },
-            None => {
-                self.working_dir = Config::read()?.working_dir().clone();
-                return Ok(self)
-            }
-        }
+    pub fn set_working_dir(&mut self, working_dir: PathBuf) -> &mut Self {
+        self.working_dir = working_dir;
+        self
     }
 
     ///
@@ -106,14 +90,12 @@ impl Policy {
     /// If not, read the disable_timeout from config and set the
     /// disable_timeout to that
     ///
-    pub fn set_disable_timeout(mut self, disable: bool) -> Result<Self> {
-        if !disable {
-            self.disable_timeout = Config::read()?.disable_timeout();
-            return Ok(self)
+    pub fn set_disable_timeout(&mut self, disable: bool) -> &mut Self {
+        if disable {
+            self.disable_timeout = disable
         }
-        
-        self.disable_timeout = disable;
-        return Ok(self)
+
+        self
     }
 }
 

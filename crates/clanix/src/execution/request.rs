@@ -36,6 +36,7 @@ pub enum OutputMessage {
     Stderr(std::io::Result<Vec<u8>>),
 }
 
+#[must_use]
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
     #[serde(
@@ -716,13 +717,14 @@ impl ExecutionRequest {
         })
     }
 
-    pub fn arg<S: Into<OsString>>(mut self, arg: S) -> Self {
+    /// Used to pass a single argument
+    pub fn arg<S: Into<OsString>>(&mut self, arg: S) -> &mut Self {
         self.args.push(arg.into());
         self
     }
 
     /// This is used to pass multiple arguments, Vec<> in this case
-    pub fn args<I, S>(mut self, args: I) -> Self
+    pub fn args<I, S>(&mut self, args: I) -> &mut Self
         where
             I: IntoIterator<Item = S>,
             S: Into<OsString>,
@@ -733,6 +735,10 @@ impl ExecutionRequest {
             self
         }
 
+    pub fn policy(&self) -> &Policy {
+        &self.policy
+    }
+        
     ///
     /// These functions return Error(which gets converted from PolicyError internally)
     /// instead of RequestError because these are used to change the policy state and
@@ -745,19 +751,19 @@ impl ExecutionRequest {
     /// the individual policy key
     /// These functions are for setting the individual
     /// policy keys
-    pub fn set_timeout(mut self, timeout: Option<Duration>) -> Result<Self> {
-        self.policy = Policy::set_timeout(self.policy, timeout)?;
-        Ok(self)
+    pub fn set_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.policy.set_timeout(timeout);
+        self
     }
 
-    pub fn set_disable_timeout(mut self, disable: bool) -> Result<Self> {
-        self.policy = Policy::set_disable_timeout(self.policy, disable)?;
-        Ok(self)
+    pub fn set_disable_timeout(&mut self, disable: bool) -> &mut Self {
+        self.policy.set_disable_timeout(disable);
+        self
     }
 
-    pub fn set_working_dir(mut self, directory: Option<PathBuf>) -> Result<Self> {
-        self.policy = Policy::set_working_dir(self.policy, directory)?;
-        Ok(self)
+    pub fn set_working_dir(&mut self, working_dir: PathBuf) -> &mut Self {
+        self.policy.set_working_dir(working_dir);
+        self
     }
 
     pub fn to_json(&self) -> Result<String> {

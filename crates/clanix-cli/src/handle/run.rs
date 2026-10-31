@@ -20,13 +20,15 @@ pub fn handle_run(
     working_dir: Option<std::path::PathBuf>,
 ) -> Result<()> {
     // Run in that environment with these arguments
-    let request = environment
-        .new_request(&program)?
-        .args(&args)
-        .set_disable_timeout(disable_timeout)?
-        .set_timeout(timeout)?
-        .set_working_dir(working_dir)?;
+    let mut request = environment
+        .new_request(&program)?;
+    
+    request.args(&args).set_disable_timeout(disable_timeout);
+    
+    if let Some(timeout) = timeout { request.set_timeout(timeout); }
 
+    if let Some(working_dir) = working_dir { request.set_working_dir(working_dir); }
+    
     // IMPORTANT: Execute the request in that environment because
     // running the request outside of the environment will make the
     // request and error drift apart from the rest of the environment..

@@ -15,6 +15,7 @@ use std::time::Duration;
 use serde::{Serialize, Deserialize};
 use serde_json;
 use toml;
+use humantime_serde::{self, re::humantime};
 
 use crate::ConfigError;
 
@@ -39,7 +40,10 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigBuilder {
     disable_timeout: bool,
+
+    #[serde(with = "humantime_serde")]
     timeout: Duration,
+    
     working_dir: PathBuf,
 }
 
@@ -54,11 +58,9 @@ impl std::fmt::Display for ConfigBuilder {
         } else {
             writeln!(f, " > Enabled")?;
         }
-        
-        // writeln!(f, "Disable timeout? {}", self.disable_timeout)?;
-        
+                
         write!(f, " > Threshold:")?;
-        writeln!(f, " {}s {}ms", self.timeout.as_secs(), self.timeout.subsec_millis())?;
+        writeln!(f, "{}", humantime::format_duration(self.timeout))?;
 
         writeln!(f, "\nWorking directory: {}\n", self.working_dir.display())?;
         
@@ -76,7 +78,7 @@ impl Config {
      */
      
     pub fn new() -> Result<ConfigBuilder> {
-        ConfigBuilder::read()
+        ConfigBuilder::new()
     }
 
     pub fn read() -> Result<ConfigBuilder> {
@@ -84,11 +86,9 @@ impl Config {
     }
 
     pub fn set_default() -> Result<ConfigBuilder> {
-        ConfigBuilder::default()?.generate()
+        ConfigBuilder::set_default()
     }
     
-    /// Default timeout of 1ms is just for experimentation
-    /// and will be changed in future so it's more realistic
     pub fn default_timeout() -> Duration {
         Duration::from_secs(60)
     }
@@ -112,7 +112,7 @@ impl ConfigBuilder {
     /// without making change in disk/config
 
     pub fn new() -> Result<Self> {
-        Self::read()
+        Self::default()
     }
     
     pub fn default() -> Result<Self> {
@@ -124,7 +124,8 @@ impl ConfigBuilder {
     }
     
     pub fn set_default() -> Result<Self> {
-        Self::default()?.generate()
+        let _ = Self::default()?.generate();
+        Self::default()
     }
 
     pub fn to_json(&self) -> Result<String> {
@@ -137,13 +138,12 @@ impl ConfigBuilder {
             .map_err(|e| ConfigError::PrepareToml(e))
     }
     
-    pub fn set_disable_timeout(mut self, disable: Option<bool>) -> Result<Self> {
-        match disable {
-            Some(dis) => {
-                self.disable_timeout = dis;
-                self.generate()
-            },
-            None => Ok(self)
+    pub fn set_disable_timeout(&mut self, disable: bool) -> Result<&Self> {
+        if self.disable_timeout() != disable {
+            self.disable_timeout = disable;
+            self.generate()
+        } else {
+            Ok(self)
         }
     }
 
@@ -159,42 +159,27 @@ impl ConfigBuilder {
         &self.working_dir
     }
     
-    pub fn set_timeout(mut self, timeout: Option<Duration>) -> Result<Self> {
-        match timeout {
-            Some(time) => {
-                self.timeout = time;
-                self.generate() // make changes to disk
-            },
-            None => return Ok(self)
+    pub fn set_timeout(&mut self, timeout: Duration) -> Result<&Self> {
+        if self.timeout() != timeout {
+            self.timeout = timeout;
+            self.generate()
+        } else {
+            Ok(self)
         }
     }
 
-    pub fn set_working_dir(mut self, working_dir: Option<PathBuf>) -> Result<Self> {
-        match working_dir {
-            Some(dir) => {
-                self.working_dir = dir;
-                self.generate() // make changes to disk
-            },
-            None => return Ok(self)
+    pub fn set_working_dir(&mut self, working_dir: PathBuf) -> Result<&Self> {
+        if *self.working_dir() != working_dir {
+            self.working_dir = working_dir;
+            self.generate()
+        } else {
+            Ok(self)
         }
     }
     
-    /// Create the ConfigBuilder struct instance and write on disk
-    /// 
-    /// Here, we dont write the instance of Config because the timeout
-    /// inside Config which we use to do operations is in Duration form,
-    /// because it allows us to do various kinds of stuff
-    /// but we dont want to store Duration struct instance on disk,
-    /// we want a clean timeout: u128.
-    pub fn generate(self) -> Result<Self> {
-        let config = toml::to_string_pretty(
-            &ConfigBuilder {
-                disable_timeout: self.disable_timeout,
-                timeout: self.timeout,
-                working_dir: self.working_dir.clone()
-            }
-        )
-        .map_err(ConfigError::PrepareToml)?;
+    pub fn generate(&self) -> Result<&Self> {
+        let config = toml::to_string_pretty(self)
+            .map_err(ConfigError::PrepareToml)?;
 
         fs::write(&NAME_TOML, config)
             .map_err(|source| ConfigError::Write {
@@ -210,10 +195,7 @@ impl ConfigBuilder {
     /// 
     /// This doesn't create or change the config on disk
     pub fn read() -> Result<Self> {
-        let config = if PathBuf::from(NAME_TOML).exists() {
-            // let file = fs::File::open(NAME_TOML)
-            //     .map_err(ConfigError::Open)?;
-            
+        let config = if PathBuf::from(NAME_TOML).exists() {            
             let content = fs::read_to_string(NAME_TOML)
                 .map_err(|source| ConfigError::Read {
                     path: PathBuf::from(NAME_TOML),
@@ -223,7 +205,7 @@ impl ConfigBuilder {
                 .map_err(ConfigError::ParseToml)? 
             
         } else {
-            Self::default()?.generate()?
+            Self::set_default()?
         };
         Ok(config)
     }

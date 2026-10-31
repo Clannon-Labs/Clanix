@@ -29,10 +29,14 @@ pub fn handle_config(
             if default {
                 let _ = environment.set_default_config()?;
             } else {
-                let _ = Config::read()?
-                    .set_disable_timeout(disable_timeout)?
-                    .set_timeout(timeout)?
-                    .set_working_dir(working_dir);
+                let config = environment.config_mut();
+
+                if let Some(dis_time) = disable_timeout { config.set_disable_timeout(dis_time)?; }
+
+                if let Some(t_out) = timeout { config.set_timeout(t_out)?; }
+
+                if let Some(dir) = working_dir { config.set_working_dir(dir)?; }
+                
             }
 
             if verbose {
@@ -42,8 +46,6 @@ pub fn handle_config(
                 println!("{label}  Configuration updated.\n");
             }
 
-            // let _ = environment.result_mut()?
-            // .set_stdout(message)?;
         }
         ConfigCommands::What {
             disable_timeout,

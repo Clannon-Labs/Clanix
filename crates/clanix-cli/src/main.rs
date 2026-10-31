@@ -21,7 +21,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand, ValueEnum};
 use color_print::cformat;
 use serde::{Deserialize, Serialize};
-use humantime;
+use humantime_serde::re::humantime;
 
 use clanix::{Detector, Environment};
 

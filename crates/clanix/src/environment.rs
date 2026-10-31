@@ -23,7 +23,7 @@ use crate::ResultError;
 /// 
 #[derive(Debug, Clone, Serialize)] // This could be made more richer and informative ig
 pub struct Environment {
-    request: ExecutionRequest,
+    request: Option<ExecutionRequest>,
     result: Option<ExecutionResult>,
     config: ConfigBuilder,
 }
@@ -32,7 +32,7 @@ impl Environment {
     /// Create a brand new environment instance with the default values
     pub fn new() -> Result<Self> {
         Ok(Self {
-            request: ExecutionRequest::default()?,
+            request: None,
             result: None,
             config: ConfigBuilder::default()?,
         })
@@ -66,9 +66,10 @@ impl Environment {
     /// to environment, then incase the execution fails, the environment would hold the older
     /// request and result, which might make the clients think that the older request has failed
     pub fn execute_request(&mut self, request: ExecutionRequest) -> Result<&ExecutionResult> {
-        self.request = request;
-        let result = self.request.execute()?;
-        self.result = Some(result);
+        self.request = Some(request);
+        if let Some(request) = self.request() {
+            self.result = Some(request.execute()?);
+        }
 
         self.result()
     }
@@ -85,10 +86,11 @@ impl Environment {
         where 
             F: FnMut(ExecutionEvent)
     {
-        self.request = request;
-        let result = self.request.execute_with_events(on_event)?;
-        self.result = Some(result);
-
+        self.request = Some(request);
+        if let Some(request) = self.request() {
+            self.result = Some(request.execute_with_events(on_event)?);
+        }
+        
         self.result()
     }
 
@@ -110,8 +112,8 @@ impl Environment {
     }
 
     /// Get the reference of request field out of the environment instance
-    pub fn request(&self) -> &ExecutionRequest {
-        &self.request
+    pub fn request(&self) -> Option<&ExecutionRequest> {
+        self.request.as_ref()
     }
 
     /// Get the reference of result field out of the environment instance
@@ -147,8 +149,12 @@ impl Environment {
     /// 
     /// The persistent version is the config, which stays on disk
     /// and can stay same for all runs
-    pub fn policy(&self) -> &Policy {
-        &self.request.policy
+    pub fn policy(&self) -> Option<&Policy> {
+        if let Some(request) = self.request() {
+            Some(&request.policy())
+        } else {
+            None
+        }
     }
 
 }
@@ -168,18 +174,16 @@ impl std::fmt::Display for Environment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\nENVIRONMENT")?;
         writeln!(f, "=============")?;
-        writeln!(f, "{}", self.request)?;
 
-        // Print result only if it has some value,
-        // if not, print None.
-        // 
-        // We used this check to avoid printing it as Some()
-        // in the terminal
+        if let Some(request) = self.request(){
+            writeln!(f, "{}", request)?;
+        }
+
         if let Some(result) = &self.result {
             writeln!(f, "{}", result)?;
-        } else {
-            writeln!(f, "Result: None")?;
         }
+
+        writeln!(f, "{}", self.config)?;
         
         Ok(())
     }

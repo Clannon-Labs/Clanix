@@ -1,34 +1,35 @@
 
 use std::time::Duration;
-use std::path::{PathBuf, Path};
+use std::path::PathBuf;
 
 use serde::{Serialize, Deserialize};
 
-use crate::config::Config;
-use crate::PolicyError;
-
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Policy {
-    pub(crate) disable_timeout: bool,
-    pub(crate) timeout: Duration,
-    pub(crate) working_dir: PathBuf,
+    pub(crate) disable_timeout: Option<bool>,
+    pub(crate) timeout: Option<Duration>,
+    pub(crate) working_dir: Option<PathBuf>,
 }
 
 impl std::fmt::Display for Policy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\nPolicy")?;
         writeln!(f, "-------\n")?;
-        writeln!(f, "Disable timeout? {}", self.disable_timeout)?;
+        if let Some(disable) = self.disable_timeout {
+            writeln!(f, "Disable timeout? {}", disable)?;
+        }
 
-        writeln!(f, "Timeout seconds: {:?}", self.timeout)?;
+        if let Some(t_out) = self.timeout {
+            writeln!(f, "Timeout {:?}", t_out)?;
+        }
 
-        writeln!(f, "\nWorking directory: {}\n", self.working_dir.display())?;
+        if let Some(dir) = self.working_dir() {
+            writeln!(f, "\nWorking directory: {:#?}\n", dir)?;
+        }
         
         Ok(())
     }
 }
-
-type Result<T> = std::result::Result<T, PolicyError>;
 
 ///
 /// Calling any method on policy changes data only in memory
@@ -36,30 +37,22 @@ type Result<T> = std::result::Result<T, PolicyError>;
 /// in disk, you MUST call the Config methods, not Policy ones
 ///
 impl Policy {
-    pub fn default() -> Result<Self> {
-        Ok(Self {
-            disable_timeout: Config::default_disable_timeout(),
-            timeout: Config::default_timeout(),
-            working_dir: Config::default_working_dir()?,
-        })
-    }
-
-    /// Just an alias for defaults()
-    pub fn new() -> Result<Self> {
+    /// Just an alias for default()
+    pub fn new() -> Self {
         Self::default()
     }
 
 
-    pub fn timeout(&self) -> Duration {
-        self.timeout
+    pub fn timeout(&self) -> Option<&Duration> {
+        self.timeout.as_ref()
     }
     
-    pub fn disable_timeout(&self) -> bool {
+    pub fn disable_timeout(&self) -> Option<bool> {
         self.disable_timeout
     }
     
-    pub fn working_dir(&self) -> &Path {
-        &self.working_dir
+    pub fn working_dir(&self) -> Option<&PathBuf> {
+        self.working_dir.as_ref()
     }
 
     ///
@@ -69,7 +62,7 @@ impl Policy {
     /// timeout to that
     ///
     pub fn set_timeout(&mut self, timeout: Duration) -> &Self {
-        self.timeout = timeout;
+        self.timeout = Some(timeout);
         self
     }
 
@@ -80,7 +73,7 @@ impl Policy {
     /// working_dir to that
     ///
     pub fn set_working_dir(&mut self, working_dir: PathBuf) -> &mut Self {
-        self.working_dir = working_dir;
+        self.working_dir = Some(working_dir);
         self
     }
 
@@ -91,10 +84,7 @@ impl Policy {
     /// disable_timeout to that
     ///
     pub fn set_disable_timeout(&mut self, disable: bool) -> &mut Self {
-        if disable {
-            self.disable_timeout = disable
-        }
-
+        self.disable_timeout = Some(disable);
         self
     }
 }

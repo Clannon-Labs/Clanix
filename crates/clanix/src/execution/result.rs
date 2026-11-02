@@ -188,7 +188,7 @@ impl ExecutionOutput {
             *stdout = new_stdout.into_bytes();
             Ok(self)
         } else {
-            return Err(ResultError::SetStdoutError.into())
+            return Err(ResultError::SetStdoutError(new_stdout))?
         }
     }
 
@@ -200,7 +200,7 @@ impl ExecutionOutput {
             *stderr = new_stderr.into_bytes();
             Ok(self)
         } else {
-            return Err(ResultError::SetStderrError.into())
+            return Err(ResultError::SetStderrError(new_stderr))?
         }
     }
 }
@@ -301,20 +301,20 @@ impl ExecutionResult {
         self
     }
 
-    pub fn set_stdout(&mut self, new_stdout: String) -> Result<&mut Self> {
+    pub fn set_stdout(&mut self, new_stdout: String) -> Option<&mut Self> {
         // self.stdout = new_stdout.into_bytes();
         // self
 
-        self.output.set_stdout(new_stdout)?;
-        Ok(self)
+        let _ = self.output.set_stdout(new_stdout);
+        Some(self)
     }
 
-    pub fn set_stderr(&mut self, new_stderr: String) -> Result<&mut Self> {
+    pub fn set_stderr(&mut self, new_stderr: String) -> Option<&mut Self> {
         // self.stderr = new_stderr.into_bytes();
         // self
 
-        self.output.set_stderr(new_stderr)?;
-        Ok(self)
+        let _ = self.output.set_stderr(new_stderr);
+        Some(self)
     }
 }
 

@@ -21,26 +21,27 @@ pub fn handle_run(
 ) -> Result<()> {
     // Run in that environment with these arguments
     let mut request = environment
-        .new_request(&program)?;
+        .new_request(&program);
     
-    request.args(&args).set_disable_timeout(disable_timeout);
-    
-    if let Some(timeout) = timeout { request.set_timeout(timeout); }
+    request
+        .args(&args)
+        .disable_timeout(disable_timeout)
+        .timeout(timeout)
+        .working_dir(working_dir);
 
-    if let Some(working_dir) = working_dir { request.set_working_dir(working_dir); }
-    
-    // IMPORTANT: Execute the request in that environment because
-    // running the request outside of the environment will make the
-    // request and error drift apart from the rest of the environment..
-    //
-    // let result = environment.execute_request(request)?.to_owned();
+    // These if let blocks aren't needed because clanix accepts both Option<T> and T
+    // if let Some(timeout) = timeout { request.set_timeout(timeout); }
 
+    // if let Some(working_dir) = working_dir { request.set_working_dir(working_dir); }
+    
     let mut error: Option<io::Error> = None;
     
     let result = if !stream {
-        environment.execute_request(request)?.to_owned()
+        // environment.execute_request(&request)?.to_owned()
+        request.execute()?
     } else {
-          environment.execute_request_with_events(request, |event| {
+          // environment.execute_request_with_events(&request, |event| {
+          request.execute_with_events(|event| {
               match event {
                   #[allow(unused)]
                   ExecutionEvent::Started { id } => {
@@ -89,8 +90,6 @@ pub fn handle_run(
                     stderr_output
                 };
         
-                // let _ = environment.result_mut()?
-                // .set_stdout(message)?;
             } else {
                 output_result = if !stderr_output.trim().is_empty() {
                     stderr_output
@@ -98,10 +97,6 @@ pub fn handle_run(
                     stdout_output
                 };
                 
-                // let final_output = output.clone().into_owned();
-        
-                // let _ = environment.result_mut()?
-                // .set_stderr(final_output)?;
             }
         },
         ExecutionOutput::Merged { .. } => {

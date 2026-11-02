@@ -21,6 +21,9 @@ pub enum Error {
     #[error("result stage failed: {0}")]
     Result(#[from] ResultError),
 
+    #[error("couldn't resolve the config: {0}")]
+    Resolve(#[from] ResolveError),
+    
     #[error("project detection failed: {0}")]
     Detect(#[from] std::io::Error),
 
@@ -111,7 +114,10 @@ pub enum RequestError {
 
     #[error("argument(s) is invalid: {0}")]
     InvalidArgs(String),
-
+    
+    #[error("couldn't find current working directory: {0}")]
+    WorkingDirNotFound(#[from] std::io::Error),
+    
     #[error("couldn't serialize execution request as JSON: {0}")]
     JsonError(#[from] serde_json::Error),
 
@@ -137,11 +143,11 @@ pub enum ResultError {
     #[error("given result is unknown")]
     UnknownError,
 
-    #[error("cannot set separate stdout when output is not in separate mode")]
-    SetStdoutError,
+    #[error("cannot set separate stdout when output is not in separate mode: {0}")]
+    SetStdoutError(String),
 
-    #[error("cannot set separate stderr when output is not in separate mode")]
-    SetStderrError,
+    #[error("cannot set separate stderr when output is not in separate mode: {0}")]
+    SetStderrError(String),
     
     #[error("couldn't convert to json: {0}")]
     JsonError(#[from] serde_json::Error),
@@ -213,3 +219,12 @@ pub enum ConfigError {
     JsonError(#[from] serde_json::Error),
 }
 
+#[derive(Debug, ThisError)]
+#[non_exhaustive]
+pub enum ResolveError {
+    #[error("couldn't read values from config")]
+    Config(#[from] ConfigError),
+
+    #[error("couldn't determine working directory")]
+    WorkingDir(#[source] std::io::Error),
+}

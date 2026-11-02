@@ -59,7 +59,7 @@ pub fn handle_config(
             } else if timeout {
                 println!("{:?}", config.timeout())
             } else if working_dir {
-                println!("{}", config.working_dir().display())
+                println!("{:#?}", config.working_dir())
             } else {
                 let heading = cformat!("<bold><cyan>Clanix configuration</>");
                 println!("{heading}\n{config}");
@@ -67,10 +67,11 @@ pub fn handle_config(
         }
     }
 
-    let result = environment.result_mut()?;
-
-    let _ = result.set_success(true);
-    let _ = result.set_status(Some(101));
-    result.set_stderr("".to_string())?;
+    if let Some(mut result) = environment.last_result_mut() {
+        let _ = result.set_success(true);
+        let _ = result.set_status(Some(101));
+        result.set_stderr("".to_string());
+    }
+    
     Ok(())
 }

@@ -275,7 +275,7 @@ fn clanix_cli() -> Result<(), Error> {
     } = CliInput::parse();
 
     // Create a new environment for execution
-    let mut environment = Environment::new()?;
+    let mut environment = Environment::new();
 
     match command {
         Commands::Run { program, args} => {

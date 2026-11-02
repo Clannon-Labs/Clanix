@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clanix::Environment;
 use color_print::cformat;
@@ -12,33 +12,40 @@ pub fn handle_snapshot(
     path: PathBuf,
     output_format: OutputFormat,
 ) -> Result<()> {
+
+    if let Some(result) = environment.last_result() {
+        let final_path = result.working_dir().join(path);
+
+        write(output_format, &final_path, &environment)?;
+
+        let label = cformat!("<bold><green>✔Snapshot</>");
+        println!("{label}\n Saved text snapshot to {}", final_path.display());
+    }
+
+    Ok(())
+}
+
+fn write(
+   output_format: OutputFormat,
+   path: &Path,
+   environment: &Environment,
+) -> Result<()> {
+
     match output_format {
         // No verbose check because inside the match command block,
         // each command already wrote their verbose output
         OutputFormat::Text => {
-            let final_path = environment.result()?.working_dir().join(path);
-
-            fs::write(&final_path, &environment.to_string())?;
-            let label = cformat!("<bold><green>✔Snapshot</>");
-            println!("{label}\n Saved text snapshot to {}", final_path.display());
+            fs::write(&path, &environment.to_string())?;
 
             Ok(())
         }
         OutputFormat::Json => {
-            let final_path = environment.result()?.working_dir().join(path);
-
-            fs::write(&final_path, &environment.to_json()?)?;
-            let label = cformat!("<bold><green> Snapshot</>");
-            println!("{label}\n Saved JSON snapshot to {}", final_path.display());
+            fs::write(&path, &environment.to_json()?)?;
 
             Ok(())
         }
         OutputFormat::Toml => {
-            let final_path = environment.result()?.working_dir().join(path);
-
-            fs::write(&final_path, &environment.to_toml()?)?;
-            let label = cformat!("<bold><green>✔Snapshot</>");
-            println!("{label}\n Saved TOML snapshot to {}", final_path.display());
+            fs::write(&path, &environment.to_toml()?)?;
 
             Ok(())
         }

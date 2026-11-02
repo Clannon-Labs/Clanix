@@ -14,11 +14,11 @@ pub fn handle_test(environment: &mut Environment, verbose: bool) -> Result<()> {
         println!("{label}  {simulated} Tests completed successfully.");
     }
 
-    let result = environment.result_mut()?;
-
-    let _ = result.set_success(true);
-    let _ = result.set_status(Some(101));
-    result.set_stderr("".to_string())?;
-
+    if let Some(mut result) = environment.last_result_mut() {
+        let _ = result.set_success(true);
+        let _ = result.set_status(Some(101));
+        result.set_stderr("".to_string());
+    }
+    
     Ok(())
 }

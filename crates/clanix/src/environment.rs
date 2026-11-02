@@ -1,14 +1,14 @@
 
 use std::ffi::OsString;
+use std::cell::{Ref, RefMut, RefCell};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::{Config, ExecutionEvent, ExecutionRequest, ExecutionResult};
+use crate::{ExecutionRecord, ExecutionEvent, ExecutionRequest, ExecutionResult};
 use crate::Policy;
-use crate::ConfigBuilder;
+use crate::Config;
+use crate::Resolver;
 use crate::{Error, Result};
-
-use crate::ResultError;
 
 /// The main Environment struct that provides a clean set of APIs the users can
 /// call to manage the environment more easily instead of having to think about every
@@ -21,23 +21,36 @@ use crate::ResultError;
 /// and managing each thing, the Environment will increasingly provide a better set of APIs
 /// to do so
 /// 
-#[derive(Debug, Clone, Serialize)] // This could be made more richer and informative ig
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Environment {
-    request: Option<ExecutionRequest>,
-    result: Option<ExecutionResult>,
-    config: ConfigBuilder,
+    pub(crate) history: RefCell<Vec<ExecutionRecord>>,
+    resolver: Resolver
 }
 
 impl Environment {
     /// Create a brand new environment instance with the default values
-    pub fn new() -> Result<Self> {
-        Ok(Self {
-            request: None,
-            result: None,
-            config: ConfigBuilder::default()?,
-        })
+    pub fn new() -> Self {
+        Self { 
+            history: RefCell::default(),
+            resolver: Resolver::default(),
+        }
     }
 
+    pub fn with_config(config: Config) -> Self {
+        Self { 
+            history: RefCell::default(),
+            resolver: Resolver::new(config)
+        }
+    }
+
+    pub fn from_disk() -> Result<Self> {
+        Ok(Self { 
+            history: RefCell::default(),
+            resolver: Resolver::from_disk()
+               .map_err(Error::Resolve)? 
+        })
+    }
+    
     /// Create a new execution request instance.
     /// 
     /// Note that this just creates an instance of execution request,
@@ -47,114 +60,114 @@ impl Environment {
     /// and pass the arguments to it along the way (i.e. by chaining commands)
     /// and at last, when you want to actually execute it, you can call the
     /// executer method
-    pub fn new_request<S: Into<OsString>>(&self, program: S) -> Result<ExecutionRequest> {
-        Ok(ExecutionRequest {
+    pub fn new_request<S: Into<OsString>>(&self, program: S) -> ExecutionRequest<'_> {
+        ExecutionRequest {
+            env: Some(self),
             program: program.into(),
             args: Vec::new(),
-            policy: Policy::default()?,
-        })
-    }
-
-    /// After creating an execution request (which is mandatory),
-    /// execute it
-    /// 
-    /// Note that this function immediately stores the request in the environment
-    /// before it executes it and executes the request from the request stored in 
-    /// the environment
-    /// 
-    /// This doesn't seem so different but if we were executing the request before storing 
-    /// to environment, then incase the execution fails, the environment would hold the older
-    /// request and result, which might make the clients think that the older request has failed
-    pub fn execute_request(&mut self, request: ExecutionRequest) -> Result<&ExecutionResult> {
-        self.request = Some(request);
-        if let Some(request) = self.request() {
-            self.result = Some(request.execute()?);
+            policy: Policy::default(),
         }
-
-        self.result()
     }
 
-    /// This method is also the same as the above, it too stores the request before it executes it
+    pub fn resolver(&self) -> &Resolver {
+        &self.resolver
+    }
+
+    pub fn history(&self) -> Ref<'_, Vec<ExecutionRecord>> {
+        self.history.borrow()
+    }
+
+    pub fn history_mut(&self) -> RefMut<'_, Vec<ExecutionRecord>> {
+        self.history.borrow_mut()
+    }
+    
+    pub fn attach<'a>(&'a self, request: ExecutionRequest<'static>) -> ExecutionRequest<'a> {
+        ExecutionRequest {
+            env: Some(self),
+            program: request.program,
+            args: request.args,
+            policy: request.policy
+        }
+    }
+    
+    /// If you created the request inside the Environment, your request will automatically
+    /// have a reference to the environment; so you dont have to worry about strictly
+    /// executing request via the environment only; 
     /// 
-    /// Since these methods are just wrappers around the actual executer methods, their behaviour is
-    /// identical
+    /// For example;
+    /// ```no_run
+    ///     let env = Environment::new();
+    ///     let request = env.new_request("echo");
+    /// 
+    ///     // In any of the setters in the request, you can give it any of the 
+    ///     // T and Some(T) and it will automatically use the T if available;
+    ///     // if not, it will just return the request unmutated
+    ///     env.arg("Hey");  
+    ///     // Or env.arg(Some("Hey"))
+    ///     
+    ///     // While it is techically valid for all setters, giving None inplace of 
+    ///     // args might produce unexpected results
+    ///     // Or env.arg(None) 
+    /// 
+    ///     let result = env.execute_request(&request)?;
+    ///     // Or request.execute()?; 
+    ///     // Here, both are identical and wont do anything different
+    ///                 
+    /// ```
+    /// 
+    pub fn execute_request(
+        &self,
+        request: &ExecutionRequest<'_>
+    ) -> Result<ExecutionResult> {
+        
+        request.execute()
+    }
+
+    /// This method is also the same as the above,
+    /// But for non-blocking/streaming requests where
     pub fn execute_request_with_events<F>(
-        &mut self, 
-        request: ExecutionRequest,
+        &self, 
+        request: &ExecutionRequest,
         on_event: F
-    ) -> Result<&ExecutionResult> 
+    ) -> Result<ExecutionResult> 
         where 
             F: FnMut(ExecutionEvent)
     {
-        self.request = Some(request);
-        if let Some(request) = self.request() {
-            self.result = Some(request.execute_with_events(on_event)?);
-        }
-        
-        self.result()
-    }
-
-    /// Get the default result instance
-    /// 
-    /// Note that this is just for the case where you just want an execution result
-    /// instance without actually running anything.
-    /// It's not the result you get after executing the request
-    pub fn new_result(&self) -> ExecutionResult {
-        ExecutionResult::default()
+        request.execute_with_events(on_event)
     }
 
     /// Set the config to default
-    pub fn set_default_config(&mut self) -> Result<&ConfigBuilder> {
+    pub fn set_default_config(&mut self) -> Result<Config> {
         let config = Config::set_default()?;
-        self.config = config;
-        Ok(&self.config)
+        self.resolver = Resolver::new(config);
+        Ok(Config::default())
         
     }
 
-    /// Get the reference of request field out of the environment instance
-    pub fn request(&self) -> Option<&ExecutionRequest> {
-        self.request.as_ref()
+    pub fn last_execution(&self) -> Option<Ref<'_, ExecutionRecord>> {
+        Ref::filter_map(self.history(), |his| his.last()).ok()
     }
 
-    /// Get the reference of result field out of the environment instance
-    pub fn result(&self) -> Result<&ExecutionResult> {
-        self.result
-            .as_ref()
-            .ok_or_else(|| Error::Result(ResultError::Empty)) 
+    pub fn last_result(&self) -> Option<Ref<'_, ExecutionResult>> {
+        Ref::filter_map(self.history(), |his| his.last())
+            .map(|record| Ref::map(record, |r| r.result()))
+            .ok()
     }
 
-    /// Get the mutable reference of the result field
-    pub fn result_mut(&mut self) -> Result<&mut ExecutionResult> {
-        self.result
-            .as_mut()
-            .ok_or_else(|| Error::Result(ResultError::Empty))
-            
+    pub fn last_result_mut(&self) -> Option<RefMut<'_, ExecutionResult>> {
+        RefMut::filter_map(self.history_mut(), |his| his.last_mut())
+            .map(|record| RefMut::map(record, |r| &mut r.result))
+            .ok()
+    }
+    
+    /// Get the reference of config instance
+    pub fn config(&self) -> &Config {
+        &self.resolver.config()
     }
 
-    /// Get the reference of config/configbuilder instance
-    pub fn config(&self) -> &ConfigBuilder {
-        &self.config
-    }
-
-    /// Get the mutable reference of config/configbuilder instance
-    pub fn config_mut(&mut self) -> &mut ConfigBuilder {
-        &mut self.config
-    }
-
-    /// Get the reference of config instance that was passed when the
-    /// user made the execution request
-    /// 
-    /// Note that policy is the temporary (one for each run) config that
-    /// gets reset for each run
-    /// 
-    /// The persistent version is the config, which stays on disk
-    /// and can stay same for all runs
-    pub fn policy(&self) -> Option<&Policy> {
-        if let Some(request) = self.request() {
-            Some(&request.policy())
-        } else {
-            None
-        }
+    /// Get the mutable reference of config instance
+    pub fn config_mut(&mut self) -> &mut Config {
+        self.resolver.config_mut()
     }
 
 }
@@ -175,15 +188,14 @@ impl std::fmt::Display for Environment {
         writeln!(f, "\nENVIRONMENT")?;
         writeln!(f, "=============")?;
 
-        if let Some(request) = self.request(){
-            writeln!(f, "{}", request)?;
+        let history = self.history.borrow();
+        if !history.is_empty() {
+            for record in history.iter() {
+                writeln!(f, "{:#?}", record)?;
+            }
         }
 
-        if let Some(result) = &self.result {
-            writeln!(f, "{}", result)?;
-        }
-
-        writeln!(f, "{}", self.config)?;
+        writeln!(f, "{:#?}", self.resolver)?;
         
         Ok(())
     }

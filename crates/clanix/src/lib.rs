@@ -23,6 +23,7 @@ mod execution;
 mod policy;
 mod environment;
 mod detector;
+mod resolve;
 
 // Custom crates
 pub use policy::*;
@@ -33,3 +34,5 @@ pub use environment::*;
 pub use error::*;
 
 pub use detector::*;
+
+pub(crate) use resolve::*;

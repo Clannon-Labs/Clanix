@@ -9,8 +9,6 @@ use std::time::Duration;
 
 use humantime_serde::{self, re::humantime};
 use serde::{Deserialize, Serialize};
-use serde_json;
-use toml;
 
 use crate::ConfigError;
 
@@ -136,10 +134,10 @@ impl Config {
             Some(dir) if *dir != working_dir => {
                 self.working_dir = Some(working_dir);
                 match self.save() {
-                    Ok(_) => return Ok(self),
+                    Ok(_) => Ok(self),
                     Err(_) => {
                         self.working_dir = old;
-                        return Ok(self);
+                        Ok(self)
                     }
                 }
             }
@@ -158,7 +156,7 @@ impl Config {
     pub fn save(&self) -> Result<&Self> {
         let config = toml::to_string_pretty(self).map_err(ConfigError::PrepareToml)?;
 
-        fs::write(&NAME_TOML, config).map_err(|source| ConfigError::Write {
+        fs::write(NAME_TOML, config).map_err(|source| ConfigError::Write {
             path: PathBuf::from(NAME_TOML),
             source,
         })?;
@@ -184,10 +182,10 @@ impl Config {
     }
 
     pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string_pretty(self).map_err(|e| ConfigError::JsonError(e))
+        serde_json::to_string_pretty(self).map_err(ConfigError::JsonError)
     }
 
     pub fn to_toml(&self) -> Result<String> {
-        toml::to_string_pretty(self).map_err(|e| ConfigError::PrepareToml(e))
+        toml::to_string_pretty(self).map_err(ConfigError::PrepareToml)
     }
 }

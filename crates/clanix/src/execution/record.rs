@@ -14,14 +14,14 @@ pub struct ExecutionRecord {
 
 impl ExecutionRecord {
     pub fn record(
-        request: ExecutionRequest<'static>,
+        request: &ExecutionRequest,
         effective: Effective,
         started_at: SystemTime,
         result: &ExecutionResult,
-    ) -> () {
+    ) {
         if let Some(env) = request.env {
             env.history.borrow_mut().push(Self {
-                request,
+                request: request.snapshot(),
                 effective,
                 started_at,
                 result: result.clone(),
@@ -32,7 +32,7 @@ impl ExecutionRecord {
         // return all of this again to the caller as they already gave us the pieces
         // which we just assembled and pushed; that's it
         // They already have all the data
-        ()
+        
     }
 
     pub fn request(&self) -> &ExecutionRequest<'static> {

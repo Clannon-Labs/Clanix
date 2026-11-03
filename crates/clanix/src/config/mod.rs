@@ -1,3 +1,3 @@
-mod config;
+mod def;
 
-pub use config::*;
+pub use def::*;

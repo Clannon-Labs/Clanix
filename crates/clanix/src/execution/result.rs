@@ -136,9 +136,8 @@ impl ExecutionOutput {
     }
 
     pub fn get_stdout(&self) -> Option<&[u8]> {
-        // &self.stdout
         if let ExecutionOutput::Separate { stdout, .. } = &self {
-            Some(&stdout)
+            Some(stdout)
         } else {
             None
         }
@@ -160,9 +159,8 @@ impl ExecutionOutput {
     }
 
     pub fn get_stderr(&self) -> Option<&[u8]> {
-        // &self.stderr
         if let ExecutionOutput::Separate { stderr, .. } = &self {
-            Some(&stderr)
+            Some(stderr)
         } else {
             None
         }
@@ -184,7 +182,7 @@ impl ExecutionOutput {
             *stdout = new_stdout.into_bytes();
             Ok(self)
         } else {
-            return Err(ResultError::SetStdoutError(new_stdout))?;
+            Err(ResultError::SetStdoutError(new_stdout))?
         }
     }
 
@@ -196,26 +194,25 @@ impl ExecutionOutput {
             *stderr = new_stderr.into_bytes();
             Ok(self)
         } else {
-            return Err(ResultError::SetStderrError(new_stderr))?;
+            Err(ResultError::SetStderrError(new_stderr))?
         }
     }
 }
 
+/// These simple methods exist for the caller to call,
+/// because the internal structure might change and
+/// if the caller calls the internal elements directly,
+/// it could break,
+/// so calling these methods is safer because these will
+/// translate whatever was changed internally into what the
+/// callers expect; with no breaking changes
+
+/// We dont need this default because the Default trait automatically
+/// produces default values (eg: None for Option<>, 0 for i32 etc),
+/// and we eliminate the need to introduce the overhead of loading data
+/// onto the instance when it's just a default that's gonna be replaced
+/// anyway
 impl ExecutionResult {
-    /// These simple methods exist for the caller to call,
-    /// because the internal structure might change and
-    /// if the caller calls the internal elements directly,
-    /// it could break,
-    /// so calling these methods is safer because these will
-    /// translate whatever was changed internally into what the
-    /// callers expect; with no breaking changes
-
-    /// We dont need this default because the Default trait automatically
-    /// produces default values (eg: None for Option<>, 0 for i32 etc),
-    /// and we eliminate the need to introduce the overhead of loading data
-    /// onto the instance when it's just a default that's gonna be replaced
-    /// anyway
-
     pub fn to_json(&self) -> Result<String> {
         serde_json::to_string_pretty(&self).map_err(|e| Error::Result(ResultError::JsonError(e)))
     }

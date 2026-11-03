@@ -87,7 +87,7 @@ impl std::fmt::Display for ExecutionRequest<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "\nExecution Request")?;
         writeln!(f, "--------\n")?;
-        writeln!(f, "Program: {}", self.program.display())?;
+        writeln!(f, "Program: {:#?}", self.program)?;
 
         if !self.args.is_empty() {
             // This {:#?} should pretty print, maybe??
@@ -119,21 +119,21 @@ impl ExecutionRequest<'static> {
 }
 
 /// These methods work for both standalone and environment bound instances
-impl<'env> ExecutionRequest<'env> {
-    fn prepare(&self, resolver: &Resolver) -> Result<Effective> {
+impl ExecutionRequest<'_> {
+    pub(crate) fn prepare(&self, resolver: &Resolver) -> Result<Effective> {
         let effective = resolver.resolve(&self.policy)?;
 
         Ok(effective)
     }
 
-    fn env_resolver(&self) -> Cow<'_, Resolver> {
+    pub(crate) fn env_resolver(&self) -> Cow<'_, Resolver> {
         match self.env {
             Some(env) => Cow::Borrowed(env.resolver()),
             None => Cow::Owned(Resolver::default()),
         }
     }
 
-    fn snapshot(&self) -> ExecutionRequest<'static> {
+    pub(crate) fn snapshot(&self) -> ExecutionRequest<'static> {
         ExecutionRequest {
             env: None, // detach the environment
             program: self.program.clone(),
@@ -149,8 +149,8 @@ impl<'env> ExecutionRequest<'env> {
         let (started_at, result) = (SystemTime::now(), self.execute_sync(&effective)?);
 
         // Record the end to end workflow of the run
-        ExecutionRecord::record(self.snapshot(), effective, started_at, &result);
-
+        ExecutionRecord::record(&self, effective, started_at, &result);
+        
         Ok(result)
     }
 
@@ -167,13 +167,13 @@ impl<'env> ExecutionRequest<'env> {
         );
 
         // Finished streaming; now record it
-        ExecutionRecord::record(self.snapshot(), effective, started_at, &result);
+        ExecutionRecord::record(&self, effective, started_at, &result);
 
         Ok(result)
     }
 }
 
-impl<'env> ExecutionRequest<'env> {
+impl ExecutionRequest<'_> {
     /// Used to pass a single argument
     /// You can pass both Option<T> and T
     pub fn arg<S, T>(&mut self, arg: T) -> &mut Self
@@ -205,7 +205,7 @@ impl<'env> ExecutionRequest<'env> {
 }
 
 /// Getters/setters for ExecutionRequest
-impl<'env> ExecutionRequest<'env> {
+impl ExecutionRequest<'_> {
     pub fn policy(&self) -> &Policy {
         &self.policy
     }
@@ -242,7 +242,7 @@ impl<'env> ExecutionRequest<'env> {
         T: Into<Option<PathBuf>>,
     {
         if let Some(dir) = working_dir.into() {
-            self.policy.set_working_dir(dir.into());
+            self.policy.set_working_dir(dir);
         }
         self
     }

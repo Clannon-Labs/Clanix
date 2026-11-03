@@ -26,6 +26,12 @@ pub struct Environment {
     resolver: Resolver,
 }
 
+impl Default for Environment {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Environment {
     /// Create a brand new environment instance with the default values
     pub fn new() -> Self {
@@ -155,7 +161,7 @@ impl Environment {
 
     /// Get the reference of config instance
     pub fn config(&self) -> &Config {
-        &self.resolver.config()
+        self.resolver.config()
     }
 
     /// Get the mutable reference of config instance

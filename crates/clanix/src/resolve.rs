@@ -14,7 +14,7 @@ pub struct Effective {
     working_dir: PathBuf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Resolver {
     config: Config,
 }
@@ -85,17 +85,10 @@ impl Resolver {
                 Some(dir) => dir.clone(),
                 None => match config.working_dir() {
                     Some(dir) => dir.clone(),
-                    None => std::env::current_dir().map_err(|e| ResolveError::WorkingDir(e))?,
+                    None => std::env::current_dir().map_err(ResolveError::WorkingDir)?,
                 },
             },
         })
     }
 }
 
-impl Default for Resolver {
-    fn default() -> Self {
-        Self {
-            config: Config::default(),
-        }
-    }
-}

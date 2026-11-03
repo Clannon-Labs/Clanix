@@ -15,7 +15,7 @@ use super::ExecutionRequest;
 use super::OutputMessage;
 
 /// Internal executor methods/helpers for blocking executions
-impl<'env> ExecutionRequest<'env> {
+impl ExecutionRequest<'_> {
     /// Normal Executer:
     ///
     /// It takes a reference to the execution request, so you
@@ -45,12 +45,12 @@ impl<'env> ExecutionRequest<'env> {
         let mut stdout_stream = child
             .stdout
             .take()
-            .ok_or_else(|| RequestError::StdoutUnavailable)?;
+            .ok_or(RequestError::StdoutUnavailable)?;
 
         let mut stderr_stream = child
             .stderr
             .take()
-            .ok_or_else(|| RequestError::StderrUnavailable)?;
+            .ok_or(RequestError::StderrUnavailable)?;
 
         // println!("Just took stdout and stderr streams");
 

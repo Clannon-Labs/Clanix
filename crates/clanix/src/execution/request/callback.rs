@@ -12,7 +12,7 @@ use crate::{Effective, ExecutionEvent, ExecutionOutput, ExecutionResult};
 use super::ExecutionRequest;
 
 /// Internal executer methods/helpers for non-blocking/streaming executions
-impl<'env> ExecutionRequest<'env> {
+impl ExecutionRequest<'_> {
     /// The method the clients can call if they want the output bytes to be streamed instead
     /// of returned when the process exits.
     ///

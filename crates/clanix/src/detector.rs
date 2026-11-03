@@ -108,6 +108,12 @@ impl Reason {
     }
 }
 
+impl Default for Detector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Detector {
     pub fn new() -> Self {
         Self {
@@ -176,8 +182,10 @@ impl Detector {
                             }
                             .to_owned();
 
+                            let destination: PathBuf;
+                            
                             match filename.to_str() {
-                                Some(fname) if matches!(fname, "Cargo.toml" | "Cargo.lock") => {
+                                Some("Cargo.toml" | "Cargo.lock") => {
                                     self.insert_project(Project::Rust, path, Some(explanation));
                                 }
                                 _ => {
@@ -190,48 +198,35 @@ impl Detector {
                                         eprintln!(
                                             "Rust tools often expect exactly 'Cargo.toml' !\n"
                                         );
-                                    } else if filename.eq_ignore_ascii_case("cargo.lock") {
+                                        
+                                        destination = path.with_file_name("Cargo.toml");
+
+                                        // We dont need to check again for cargo.lock because we know that
+                                        // if it's not cargo.toml; it's cargo.lock
+                                    } else { 
                                         eprintln!(
                                             "Rust tools often expect exactly 'Cargo.lock' !\n"
                                         );
-                                    }
+
+                                        destination = path.with_file_name("Cargo.lock");
+                                    };
 
                                     match take_input()?.trim() {
                                         "y" | "yes" => {
-                                            if filename.eq_ignore_ascii_case("cargo.toml") {
-                                                let destination = path.with_file_name("Cargo.toml");
-                                                fs::rename(path, &destination)?;
+                                            fs::rename(path, &destination)?;
 
-                                                self.insert_project(
-                                                    Project::Rust,
-                                                    &destination,
-                                                    Some(explanation),
-                                                );
-                                            } else if filename.eq_ignore_ascii_case("cargo.lock") {
-                                                let destination = path.with_file_name("Cargo.lock");
-                                                fs::rename(path, &destination)?;
-
-                                                self.insert_project(
-                                                    Project::Rust,
-                                                    &destination,
-                                                    Some(explanation),
-                                                );
-                                            }
+                                            self.insert_project(
+                                                Project::Rust,
+                                                &destination,
+                                                Some(explanation),
+                                            );
                                         }
                                         _ => {
-                                            if filename.eq_ignore_ascii_case("cargo.toml") {
-                                                self.insert_project(
-                                                    Project::Rust,
-                                                    path,
-                                                    Some(explanation),
-                                                );
-                                            } else if filename.eq_ignore_ascii_case("cargo.lock") {
-                                                self.insert_project(
-                                                    Project::Rust,
-                                                    path,
-                                                    Some(explanation),
-                                                );
-                                            }
+                                            self.insert_project(
+                                                Project::Rust,
+                                                path,
+                                                Some(explanation),
+                                            );
                                         }
                                     }
                                 }
@@ -270,7 +265,7 @@ impl Detector {
                                         _ => {
                                             self.insert_project(
                                                 Project::Javascript,
-                                                &path,
+                                                path,
                                                 Some(explanation),
                                             );
                                         }
@@ -349,7 +344,7 @@ impl Detector {
     }
 
     pub fn why(&self) -> &Self {
-        &self
+        self
     }
 }
 

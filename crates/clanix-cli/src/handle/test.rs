@@ -19,6 +19,6 @@ pub fn handle_test(environment: &mut Environment, verbose: bool) -> Result<()> {
         let _ = result.set_status(Some(101));
         result.set_stderr("".to_string());
     }
-    
+
     Ok(())
 }

@@ -31,12 +31,17 @@ pub fn handle_config(
             } else {
                 let config = environment.config_mut();
 
-                if let Some(dis_time) = disable_timeout { config.set_disable_timeout(dis_time)?; }
+                if let Some(dis_time) = disable_timeout {
+                    config.set_disable_timeout(dis_time)?;
+                }
 
-                if let Some(t_out) = timeout { config.set_timeout(t_out)?; }
+                if let Some(t_out) = timeout {
+                    config.set_timeout(t_out)?;
+                }
 
-                if let Some(dir) = working_dir { config.set_working_dir(dir)?; }
-                
+                if let Some(dir) = working_dir {
+                    config.set_working_dir(dir)?;
+                }
             }
 
             if verbose {
@@ -45,7 +50,6 @@ pub fn handle_config(
                 let label = cformat!("<bold><green> {NAME}</>");
                 println!("{label}  Configuration updated.\n");
             }
-
         }
         ConfigCommands::What {
             disable_timeout,
@@ -72,6 +76,6 @@ pub fn handle_config(
         let _ = result.set_status(Some(101));
         result.set_stderr("".to_string());
     }
-    
+
     Ok(())
 }

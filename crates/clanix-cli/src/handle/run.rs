@@ -1,8 +1,8 @@
-use std::io::{self, Write};
 use std::borrow::Cow;
+use std::io::{self, Write};
 use std::time::Duration;
 
-use clanix::{Environment, ExecutionOutput, ExecutionEvent};
+use clanix::{Environment, ExecutionEvent, ExecutionOutput};
 use color_print::cformat;
 
 use crate::NAME;
@@ -20,9 +20,8 @@ pub fn handle_run(
     working_dir: Option<std::path::PathBuf>,
 ) -> Result<()> {
     // Run in that environment with these arguments
-    let mut request = environment
-        .new_request(&program);
-    
+    let mut request = environment.new_request(&program);
+
     request
         .args(&args)
         .disable_timeout(disable_timeout)
@@ -33,52 +32,54 @@ pub fn handle_run(
     // if let Some(timeout) = timeout { request.set_timeout(timeout); }
 
     // if let Some(working_dir) = working_dir { request.set_working_dir(working_dir); }
-    
+
     let mut error: Option<io::Error> = None;
-    
+
     let result = if !stream {
         // environment.execute_request(&request)?.to_owned()
         request.execute()?
     } else {
-          // environment.execute_request_with_events(&request, |event| {
-          request.execute_with_events(|event| {
-              match event {
-                  #[allow(unused)]
-                  ExecutionEvent::Started { id } => {
-                      // We could later validate that clanix is giving us the
-                      // same id across the byte chunks
-                  },
-                  ExecutionEvent::Output { bytes, .. } => {
-                      // Write to stdout instead of printing
-                      if error.is_none() {
-                          let mut stdout = io::stdout().lock();
+        // environment.execute_request_with_events(&request, |event| {
+        request
+            .execute_with_events(|event| {
+                match event {
+                    #[allow(unused)]
+                    ExecutionEvent::Started { id } => {
+                        // We could later validate that clanix is giving us the
+                        // same id across the byte chunks
+                    }
+                    ExecutionEvent::Output { bytes, .. } => {
+                        // Write to stdout instead of printing
+                        if error.is_none() {
+                            let mut stdout = io::stdout().lock();
 
-                          if let Err(err) = stdout.write_all(&bytes)
-                              .and_then(|()| stdout.flush()) {
-                                  error = Some(err);
-                              }
-                      }                 
-                  }
-              }
-          })?.to_owned()
+                            if let Err(err) = stdout.write_all(&bytes).and_then(|()| stdout.flush())
+                            {
+                                error = Some(err);
+                            }
+                        }
+                    }
+                }
+            })?
+            .to_owned()
     };
 
     if let Some(err) = error {
         return Err(err.into());
     }
-    
+
     // Get the result from the environment and replace the old default result
     // let result = environment.result()?.to_owned();
 
     let args = args.join(" ");
 
     let mut output_result = Cow::Borrowed("");
-    
+
     match result.output() {
         ExecutionOutput::Separate { stdout, stderr } => {
             let stdout_output = String::from_utf8_lossy(stdout);
             let stderr_output = String::from_utf8_lossy(stderr);
-        
+
             // We display stdout incase of success and stderr incase of failure
             // But some commands might run successfully but put the content in stderr
             // so we check if there's anything on stderr incase we find stdout empty
@@ -89,26 +90,22 @@ pub fn handle_run(
                 } else {
                     stderr_output
                 };
-        
             } else {
                 output_result = if !stderr_output.trim().is_empty() {
                     stderr_output
                 } else {
                     stdout_output
                 };
-                
             }
-        },
+        }
         ExecutionOutput::Merged { .. } => {
             // The output has already been printed to the terminal, no
             // need to print it again
-
-        },
+        }
         ExecutionOutput::Terminal => {
             // The process already interacted through the terminal session.
             // Don't try to print output from the result again
-
-        },
+        }
         _ => {}
     };
 

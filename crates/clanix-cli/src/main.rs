@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use color_print::cformat;
-use serde::{Deserialize, Serialize};
 use humantime_serde::re::humantime;
+use serde::{Deserialize, Serialize};
 
 use clanix::{Detector, Environment};
 
@@ -73,10 +73,9 @@ struct CliInput {
     )]
     verbose: bool,
 
-    
-    #[arg(long, help="To get the output/stream of any process immediately")]
+    #[arg(long, help = "To get the output/stream of any process immediately")]
     stream: bool,
-    
+
     /// Whether or not user wants to save/snapshot the output to a file
     #[arg(
         short,
@@ -98,9 +97,9 @@ struct CliInput {
     output_format: OutputFormat,
 
     /// To disable timeout for any one operation
-    /// 
+    ///
     /// This currently has a limitation, if your timeout is already disabled
-    /// in the config, you have to set the persistent config manually to 
+    /// in the config, you have to set the persistent config manually to
     /// make it timeout_disabled: false or timeout_enabled: true
     #[arg(
         long = "disable-timeout",
@@ -125,12 +124,7 @@ struct CliInput {
 enum Commands {
     /// A basic command you can use to run something inside clanix
     #[command(about = "To run something inside clanix")]
-    Run {
-
-        program: String,
-
-        args: Vec<String>,
-    },
+    Run { program: String, args: Vec<String> },
 
     /// Just simulates test for now, we can put actual testing in future
     #[command(about = "To test/run the tests in the project")]
@@ -186,7 +180,6 @@ enum ConfigCommands {
             long,
             value_parser = parse_strict_timeout,
             default_value = "30s",
-            
             help = "Change/set the config value stored in timeout")]
         timeout: Option<Duration>,
 
@@ -252,7 +245,6 @@ fn parse_strict_timeout(arg: &str) -> Result<Duration, String> {
     })
 }
 
-
 fn main() {
     if let Err(err) = clanix_cli() {
         let error_label = cformat!("<bold><red>✖ Clanix error</>");
@@ -278,14 +270,12 @@ fn clanix_cli() -> Result<(), Error> {
     let mut environment = Environment::new();
 
     match command {
-        Commands::Run { program, args} => {
+        Commands::Run { program, args } => {
             let _ = run::handle_run(
                 &mut environment,
                 program,
                 args,
-
                 stream,
-                
                 verbose,
                 disable_timeout,
                 timeout,
@@ -309,7 +299,7 @@ fn clanix_cli() -> Result<(), Error> {
 
             let heading = cformat!("<bold><cyan>Project detection</>");
             // See the projects and their reasons on why they were detected.
-            // 
+            //
             // Note that this currently shows a full verbose output in the terminal
             let reason = detector.why();
             println!("{heading}\n{reason}");

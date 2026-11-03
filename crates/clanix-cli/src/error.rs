@@ -1,14 +1,6 @@
-
 use thiserror::Error as ThisError;
 
-use clanix::{
-    ConfigError,
-    PolicyError,
-    RequestError,
-    ResultError,
-
-    Error as ClanixError,
-};
+use clanix::{ConfigError, Error as ClanixError, PolicyError, RequestError, ResultError};
 
 // The consumers of this Error enum can import this Result<> type
 pub type Result<T> = std::result::Result<T, Error>;
@@ -30,7 +22,6 @@ pub enum CliError {
 
     // #[error("invalid program")]
     // InvalidProgram,
-
     #[error("I/O error")]
     Io(#[from] std::io::Error),
 
@@ -40,7 +31,6 @@ pub enum CliError {
     #[error("TOML serialization error")]
     Toml(#[from] toml::ser::Error),
 }
-
 
 impl From<RequestError> for Error {
     fn from(error: RequestError) -> Self {

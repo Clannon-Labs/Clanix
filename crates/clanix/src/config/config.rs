@@ -1,19 +1,16 @@
-//! Config also implements the builder pattern and
-//! provides the benefits that the ExecutionRequest also provides.
-//! 
 //! Config is the actual persistent policy version you use to set the persistent
-//! values
-//! 
-//! It shares the same PolicyTrait trait as policy
+//! values aka the values that get written to disk
+//!
+//! It shares the same fields as Policy
 
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde::{Serialize, Deserialize};
+use humantime_serde::{self, re::humantime};
+use serde::{Deserialize, Serialize};
 use serde_json;
 use toml;
-use humantime_serde::{self, re::humantime};
 
 use crate::ConfigError;
 
@@ -34,7 +31,7 @@ pub struct Config {
 
     #[serde(with = "humantime_serde")]
     pub(crate) timeout: Duration,
-    
+
     pub(crate) working_dir: Option<PathBuf>,
 }
 
@@ -49,12 +46,12 @@ impl std::fmt::Display for Config {
         } else {
             writeln!(f, " > Enabled")?;
         }
-                
+
         write!(f, " > Threshold:")?;
         writeln!(f, "{}", humantime::format_duration(self.timeout))?;
 
         writeln!(f, "\nWorking directory: {:#?}\n", self.working_dir)?;
-        
+
         Ok(())
     }
 }
@@ -64,22 +61,21 @@ impl Default for Config {
         Config {
             disable_timeout: Config::default_disable_timeout(),
             timeout: Config::default_timeout(),
-            working_dir: Config::default_working_dir()
+            working_dir: Config::default_working_dir(),
         }
     }
 }
-
 
 impl Config {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     pub fn set_default() -> Result<Self> {
         let _ = Self::default().save()?;
         Ok(Self::default())
-     }
-    
+    }
+
     pub fn default_timeout() -> Duration {
         Duration::from_secs(60)
     }
@@ -92,17 +88,17 @@ impl Config {
 
     /// timeout is enabled (or not disabled) by default
     pub fn default_disable_timeout() -> bool {
-        false 
-    }    
+        false
+    }
 
     pub fn timeout(&self) -> Duration {
         self.timeout
     }
-    
+
     pub fn disable_timeout(&self) -> bool {
         self.disable_timeout
     }
-    
+
     pub fn working_dir(&self) -> Option<&PathBuf> {
         self.working_dir.as_ref()
     }
@@ -117,7 +113,7 @@ impl Config {
             Ok(self)
         }
     }
-    
+
     pub fn set_timeout(&mut self, timeout: Duration) -> Result<&mut Self> {
         let old = self.timeout();
         if old != timeout {
@@ -143,10 +139,10 @@ impl Config {
                     Ok(_) => return Ok(self),
                     Err(_) => {
                         self.working_dir = old;
-                        return Ok(self)
+                        return Ok(self);
                     }
                 }
-            },
+            }
             _ => Ok(self),
         }
     }
@@ -160,32 +156,27 @@ impl Config {
 
 impl Config {
     pub fn save(&self) -> Result<&Self> {
-        let config = toml::to_string_pretty(self)
-            .map_err(ConfigError::PrepareToml)?;
+        let config = toml::to_string_pretty(self).map_err(ConfigError::PrepareToml)?;
 
-        fs::write(&NAME_TOML, config)
-            .map_err(|source| ConfigError::Write {
-                path: PathBuf::from(NAME_TOML),
-                source
-            })?;
-        
+        fs::write(&NAME_TOML, config).map_err(|source| ConfigError::Write {
+            path: PathBuf::from(NAME_TOML),
+            source,
+        })?;
+
         Ok(self)
     }
 
     /// Read the config from disk which is stored in the form of builder struct
     /// and if the file doesn't exist, return the default config.
-    /// 
+    ///
     /// This doesn't create or change the config on disk
     pub fn read() -> Result<Self> {
-        let config = if PathBuf::from(NAME_TOML).exists() {            
-            let content = fs::read_to_string(NAME_TOML)
-                .map_err(|source| ConfigError::Read {
-                    path: PathBuf::from(NAME_TOML),
-                    source
-                })?;
-            toml::from_str(&content)
-                .map_err(ConfigError::ParseToml)? 
-            
+        let config = if PathBuf::from(NAME_TOML).exists() {
+            let content = fs::read_to_string(NAME_TOML).map_err(|source| ConfigError::Read {
+                path: PathBuf::from(NAME_TOML),
+                source,
+            })?;
+            toml::from_str(&content).map_err(ConfigError::ParseToml)?
         } else {
             Self::set_default()?
         };
@@ -193,12 +184,10 @@ impl Config {
     }
 
     pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string_pretty(self)
-            .map_err(|e| ConfigError::JsonError(e))
+        serde_json::to_string_pretty(self).map_err(|e| ConfigError::JsonError(e))
     }
 
     pub fn to_toml(&self) -> Result<String> {
-        toml::to_string_pretty(self)
-            .map_err(|e| ConfigError::PrepareToml(e))
+        toml::to_string_pretty(self).map_err(|e| ConfigError::PrepareToml(e))
     }
 }

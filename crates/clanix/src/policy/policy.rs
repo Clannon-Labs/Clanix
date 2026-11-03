@@ -1,8 +1,7 @@
-
-use std::time::Duration;
 use std::path::PathBuf;
+use std::time::Duration;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Policy {
@@ -26,14 +25,14 @@ impl std::fmt::Display for Policy {
         if let Some(dir) = self.working_dir() {
             writeln!(f, "\nWorking directory: {:#?}\n", dir)?;
         }
-        
+
         Ok(())
     }
 }
 
 ///
 /// Calling any method on policy changes data only in memory
-/// so if you want to make the change persistent, aka change 
+/// so if you want to make the change persistent, aka change
 /// in disk, you MUST call the Config methods, not Policy ones
 ///
 impl Policy {
@@ -42,15 +41,14 @@ impl Policy {
         Self::default()
     }
 
-
     pub fn timeout(&self) -> Option<&Duration> {
         self.timeout.as_ref()
     }
-    
+
     pub fn disable_timeout(&self) -> Option<bool> {
         self.disable_timeout
     }
-    
+
     pub fn working_dir(&self) -> Option<&PathBuf> {
         self.working_dir.as_ref()
     }
@@ -88,4 +86,3 @@ impl Policy {
         self
     }
 }
-

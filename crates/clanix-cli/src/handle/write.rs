@@ -13,11 +13,10 @@ pub fn handle_write(
     path: PathBuf,
     content: String,
 ) -> Result<()> {
-
     if let Some(result) = environment.last_result() {
         let final_path = result.working_dir().join(path);
         fs::write(&final_path, &content)?;
-    
+
         if verbose {
             println!("{environment}");
         } else {
@@ -27,11 +26,11 @@ pub fn handle_write(
         }
     }
 
-    if let Some(mut result) = environment.last_result_mut() {    
+    if let Some(mut result) = environment.last_result_mut() {
         let _ = result.set_success(true);
         let _ = result.set_status(Some(101));
         result.set_stderr("".to_string());
     }
-    
+
     Ok(())
 }

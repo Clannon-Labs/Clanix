@@ -1,11 +1,11 @@
 //! The place where the error returned by the crate are defined
-//! 
+//!
 //! If you want to know what are the errors you might get as the consumer
-//! of this crate, you just have to look in this file, and you would know 
+//! of this crate, you just have to look in this file, and you would know
 //! everything related to the errors
 
+use std::time::Duration;
 use std::{ffi::OsString, path::PathBuf};
-use std::time::{Duration};
 
 use thiserror::Error as ThisError;
 use uuid::Uuid;
@@ -23,7 +23,7 @@ pub enum Error {
 
     #[error("couldn't resolve the config: {0}")]
     Resolve(#[from] ResolveError),
-    
+
     #[error("project detection failed: {0}")]
     Detect(#[from] std::io::Error),
 
@@ -35,7 +35,7 @@ pub enum Error {
 
     #[error("invalid directory name {0}")]
     InvalidDirectoryName(PathBuf),
-    
+
     // Convert policy errors into the crate-level error type
     #[error("invalid execution policy: {0}")]
     Policy(#[from] PolicyError),
@@ -49,38 +49,37 @@ pub enum Error {
 
     #[error("couldn't convert to toml: {0}")]
     TomlError(#[from] toml::ser::Error),
-    
+
     #[error("unknown stage found!")]
     Unknown,
 }
-
 
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum RequestError {
     #[error("given request is not confirmed for execution. Call .confirm() to confirm it!")]
     ConfirmError,
-    
+
     #[error(
         "couldn't spawn program {program:?} in the working directory {}: {source}", working_dir.display()
     )]
-    SpawnError{
+    SpawnError {
         program: OsString,
         working_dir: PathBuf,
 
         #[source]
-        source: std::io::Error
+        source: std::io::Error,
     },
 
     #[error("failed to prepare merged output pipe: {0}")]
     MergedPipe(#[source] std::io::Error),
-    
+
     #[error("failed to read the output from the merged pipe: {0}")]
     MergedRead(#[source] std::io::Error),
 
     #[error("merged output reader thread panicked")]
     Join,
-    
+
     #[error("child process did not provide a stdout stream!")]
     StdoutUnavailable,
 
@@ -89,7 +88,7 @@ pub enum RequestError {
 
     #[error("failed to read child process stdout: {0}")]
     StdoutRead(#[source] std::io::Error),
-    
+
     #[error("failed to read child process stderr: {0}")]
     StderrRead(#[source] std::io::Error),
 
@@ -105,19 +104,19 @@ pub enum RequestError {
         timeout: Duration,
         working_dir: PathBuf,
     },
-    
+
     #[error("couldn't get exit status from the process: {0}")]
     StatusError(#[source] std::io::Error),
-    
+
     #[error("program is empty")]
     EmptyProgram,
 
     #[error("argument(s) is invalid: {0}")]
     InvalidArgs(String),
-    
+
     #[error("couldn't find current working directory: {0}")]
     WorkingDirNotFound(#[from] std::io::Error),
-    
+
     #[error("couldn't serialize execution request as JSON: {0}")]
     JsonError(#[from] serde_json::Error),
 
@@ -148,13 +147,13 @@ pub enum ResultError {
 
     #[error("cannot set separate stderr when output is not in separate mode: {0}")]
     SetStderrError(String),
-    
+
     #[error("couldn't convert to json: {0}")]
     JsonError(#[from] serde_json::Error),
 
     #[error("couldn't convert to toml: {0}")]
     TomlError(#[from] toml::ser::Error),
-    
+
     #[error("invalid id found in the result")]
     InvalidId,
 
@@ -171,20 +170,17 @@ pub enum ResultError {
     InvalidStderr,
 
     #[error("invalid working directory found!")]
-    InvalidWorkingDir
+    InvalidWorkingDir,
 }
-
 
 #[derive(Debug, ThisError)]
 #[non_exhaustive] // to ensure future addition in errors wont break the system
 pub enum PolicyError {
     #[error("invalid working directory: {}", path.display())]
-    InvalidWorkingDir{
-        path: PathBuf
-    },
+    InvalidWorkingDir { path: PathBuf },
 
     #[error("error occured while reading config value: {0}")]
-    Config(#[from] ConfigError)
+    Config(#[from] ConfigError),
 }
 
 #[derive(Debug, ThisError)]
@@ -192,13 +188,13 @@ pub enum PolicyError {
 pub enum ConfigError {
     #[error("couldn't get the default working directory: {0}")]
     WorkingDir(#[source] std::io::Error),
-    
+
     #[error("couldn't read value from configuration file {}: {source}", path.display())]
     Read {
         path: PathBuf,
 
         #[source]
-        source: std::io::Error
+        source: std::io::Error,
     },
 
     #[error("couldn't write value to configuration file {}: {source}", path.display())]

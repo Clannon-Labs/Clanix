@@ -1,9 +1,9 @@
 mod event;
+mod record;
 mod request;
 mod result;
-mod record;
 
 pub use event::*;
+pub use record::*;
 pub use request::*;
 pub use result::*;
-pub use record::*;

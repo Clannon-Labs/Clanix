@@ -12,7 +12,6 @@ pub fn handle_snapshot(
     path: PathBuf,
     output_format: OutputFormat,
 ) -> Result<()> {
-
     if let Some(result) = environment.last_result() {
         let final_path = result.working_dir().join(path);
 
@@ -25,12 +24,7 @@ pub fn handle_snapshot(
     Ok(())
 }
 
-fn write(
-   output_format: OutputFormat,
-   path: &Path,
-   environment: &Environment,
-) -> Result<()> {
-
+fn write(output_format: OutputFormat, path: &Path, environment: &Environment) -> Result<()> {
     match output_format {
         // No verbose check because inside the match command block,
         // each command already wrote their verbose output

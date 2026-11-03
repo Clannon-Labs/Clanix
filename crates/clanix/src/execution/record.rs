@@ -1,11 +1,8 @@
-
 use std::time::SystemTime;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use crate::{
-    Effective, ExecutionRequest, ExecutionResult,
-};
+use crate::{Effective, ExecutionRequest, ExecutionResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRecord {
@@ -20,18 +17,15 @@ impl ExecutionRecord {
         request: ExecutionRequest<'static>,
         effective: Effective,
         started_at: SystemTime,
-        result: &ExecutionResult
+        result: &ExecutionResult,
     ) -> () {
-        
         if let Some(env) = request.env {
-            env.history.borrow_mut().push(
-                Self {
-                    request,
-                    effective,
-                    started_at,
-                    result: result.clone()
-                }
-            );
+            env.history.borrow_mut().push(Self {
+                request,
+                effective,
+                started_at,
+                result: result.clone(),
+            });
         }
 
         // We are holding quite a bit of data here, so I dont think we should

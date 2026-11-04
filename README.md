@@ -17,5 +17,5 @@ with other snapshots, and see what changed.
 daemon is running or having to go through alot of configuration
 
 > [!Note]
-This is the version of Clanix even before v0.0.1
+This is the version of Clanix even before v0.1.0
 

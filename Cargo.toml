@@ -25,7 +25,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 # Internal dependencies
-clanix = { path = "crates/clanix" }
+clanix = { path = "crates/clanix", version = "0.1.0" }
 
 # External dependencies
 serde = { version = "1.0.229", features = ["derive"] }
